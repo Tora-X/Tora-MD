@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tora MD iOS Glass UI</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --green:#00ff88;
+  --cyan:#00f2ff;
+  --red:#ff0033;
+}
+
+body{
+  margin:0;
+  background:#000;
+  font-family:'Orbitron', sans-serif;
+  overflow:hidden;
+  transition:background 0.5s;
+}
+
+/* MATRIX */
+canvas{
+  position:fixed;
+  top:0;
+  left:0;
+  z-index:0;
+}
+
+/* SCREENS */
+.screen{
+  position:absolute;
+  width:100%;
+  height:100%;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  z-index:10;
+  transition:0.5s;
+}
+.hidden{opacity:0;pointer-events:none;}
+
+/* GLASS BOXES */
+.box{
+  background:rgba(255,255,255,0.05);
+  backdrop-filter:blur(15px);
+  border-radius:25px;
+  border:1px solid rgba(255,255,255,0.15);
+  padding:30px;
+  text-align:center;
+  box-shadow:0 8px 32px rgba(0,0,0,0.4);
+  transition:0.3s;
+  width: 320px;
+}
+
+/* TITLE */
+.title{
+  font-size:2.5rem;
+  background:linear-gradient(to right,var(--red),var(--cyan));
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  margin-bottom:20px;
+}
+
+/* JP SIDE */
+.jp{
+  position:absolute;
+  left:10px;
+  top:50%;
+  transform:rotate(-90deg) translateY(-50%);
+  color:var(--cyan);
+  opacity:0.6;
+  font-family:'Noto Sans JP',sans-serif;
+}
+
+/* BUTTONS - iOS Glass Style */
+.btn{
+  margin:15px;
+  padding:15px 25px;
+  border-radius:20px;
+  background:rgba(255,255,255,0.1);
+  border:1px solid rgba(255,255,255,0.25);
+  color:var(--green);
+  font-size:1.2rem;
+  cursor:pointer;
+  backdrop-filter:blur(15px);
+  transition:0.3s;
+}
+.btn:hover{
+  background:rgba(255,255,255,0.2);
+  color:#fff;
+  box-shadow:0 0 15px var(--green);
+}
+
+/* INPUT */
+input{
+  width:85%;
+  padding:12px;
+  border:none;
+  border-radius:15px;
+  background:rgba(255,255,255,0.05);
+  color:var(--cyan);
+  text-align:center;
+  font-size:1.2rem;
+  backdrop-filter:blur(15px);
+  margin:15px 0;
+  outline: none;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+/* PAIR CODE */
+.code{
+  font-size:1.5rem;
+  color:var(--green);
+  text-shadow:0 0 10px var(--green);
+  margin-top:10px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 2px;
+}
+
+/* COPY BUTTON */
+.copy{
+  cursor:pointer;
+  font-size:1.2rem;
+  margin-left:10px;
+  vertical-align:middle;
+  transition: 0.2s;
+}
+.copy:active {
+  transform: scale(0.8);
+}
+
+/* QR FALLBACK WRAPPER */
+#qr-container {
+  margin: 20px auto 10px auto;
+  padding: 15px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  width: 180px;
+  height: 180px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+#qr-container img {
+  border-radius: 12px;
+  border: 2px solid var(--cyan);
+  box-shadow: 0 0 15px var(--cyan);
+}
+
+/* STATS */
+.stats{
+  display:flex;
+  justify-content:space-between;
+  font-size:0.8rem;
+  color:var(--green);
+  margin-top:20px;
+}
+
+/* HACK MODE */
+.hack body, .hack .box{
+  background:#300000 !important;
+  color:#ff5555 !important;
+  box-shadow:0 0 30px #ff0000 !important;
+}
+.hack .btn{
+  color:#ff5555 !important;
+  border-color:#ff5555 !important;
+}
+</style>
+</head>
+<body>
+
+<canvas id="matrix"></canvas>
+<div class="jp">接続 システム</div>
+
+<!-- MAIN SCREEN -->
+<div class="screen" id="main">
+  <div class="box">
+    <div class="title">Tora MD</div>
+    <div class="btn" onclick="openPair()">🔗 ペアリング</div>
+    <div class="btn" onclick="contact()">👤 オーナーに連絡</div>
+    <div class="btn" onclick="hackMode()">💀 ハッカーモード</div>
+    <div class="stats">
+      <span id="battery">BAT: --</span>
+      <span id="net">NET: CONNECTING</span>
+    </div>
+  </div>
+</div>
+
+<!-- PAIR SCREEN -->
+<div class="screen hidden" id="pair">
+  <div class="box">
+    <div class="title">ペアリング</div>
+    <input id="num" placeholder="947xxxxxxx">
+    <div>
+      <span class="code" id="code">------</span>
+      <span class="copy" onclick="copyCode()">📋</span>
+    </div>
+    
+    <!-- Dynamic QR Fallback box (Hidden by Default) -->
+    <div id="qr-container" style="display: none;"></div>
+
+    <div class="btn" onclick="generate()">生成</div>
+    <div class="btn" onclick="back()">← 戻る</div>
+    <div class="stats">
+      <span id="cpu">CPU: --</span>
+      <span id="ping">STATE: IDLE</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// MATRIX BACKGROUND ENGINE
+const c=document.getElementById("matrix");
+const ctx=c.getContext("2d");
+c.width=innerWidth;
+c.height=innerHeight;
+const letters="ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿ1234567890接続TORA";
+const drops=Array(Math.floor(c.width/15)).fill(1);
+setInterval(()=>{
+  ctx.fillStyle="rgba(0,0,0,0.05)";
+  ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle="#0f8";
+  ctx.font = "15px monospace";
+  drops.forEach((y,i)=>{
+    const t=letters[Math.floor(Math.random()*letters.length)];
+    ctx.fillText(t,i*15,y*15);
+    drops[i]=y*15>c.height?0:y+1;
+  });
+},33);
+
+window.addEventListener('resize', () => {
+  c.width = innerWidth;
+  c.height = innerHeight;
+});
+
+// SYSTEM NAVIGATION
+function openPair(){main.classList.add("hidden");pair.classList.remove("hidden");beep();}
+function back(){pair.classList.add("hidden");main.classList.remove("hidden");beep();}
+function contact(){window.open("https://wa.me/+94781864250?text=Hello_ToraMD_Owner");}
+
+// UI AUDIO FEEDBACK SYSTEM
+function beep(){
+  try {
+    let ctxAudio=new (window.AudioContext || window.webkitAudioContext)();
+    let osc=ctxAudio.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, ctxAudio.currentTime);
+    osc.connect(ctxAudio.destination);
+    osc.start();
+    osc.stop(ctxAudio.currentTime+0.05);
+  } catch(e) {}
+}
+
+// DIGITAL TYPEWRITER EFFECT
+function typeCode(text){
+  let i=0;code.innerText="";
+  const interval=setInterval(()=>{
+    code.innerText+=text[i];
+    beep();
+    i++;
+    if(i>=text.length) clearInterval(interval);
+  },80);
+}
+
+// REAL-TIME WEBSOCKET INFRASTRUCTURE INTEGRATION
+const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+const ws = new WebSocket(`${protocol}//${window.location.host}`);
+
+// Create an isolated dynamic runtime session tracking key for this panel user
+const sessionId = "tora_" + Math.random().toString(36).substring(2, 9);
+
+ws.onopen = () => {
+  console.log("WebSocket linked to Core Engine. Session initiated:", sessionId);
+  ws.send(JSON.stringify({ action: "init", sessionId: sessionId }));
+  document.getElementById("net").innerText = "NET: ONLINE";
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  
+  // 1. Handle code stream reception
+  if (data.type === "code") {
+    document.getElementById("qr-container").style.display = "none"; 
+    typeCode(data.code);
+  }
+  
+  // 2. Handle QR fallback rendering
+  if (data.type === "qr") {
+    code.innerText = "TIMEOUT FALLBACK";
+    const qrBox = document.getElementById("qr-container");
+    qrBox.style.display = "flex";
+    // Generates a matrix-matched cyan stylized block layout
+    qrBox.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(data.qr)}&color=00f2ff&bgcolor=000000" alt="QR Code" />`;
+    beep();
+  }
+  
+  // 3. Update runtime execution metrics states
+  if (data.type === "status") {
+    document.getElementById("ping").innerText = `STATE: ${data.status}`;
+  }
+  
+  // 4. Handle connection exceptions safely
+  if (data.type === "error") {
+    code.innerText = "ERR-RETRY";
+    alert("Engine Exception Framework Alert: " + data.message);
+  }
+};
+
+ws.onclose = () => {
+  document.getElementById("net").innerText = "NET: OFFLINE";
+  document.getElementById("ping").innerText = "STATE: CLOSED";
+};
+
+// INITIALIZE BOT PAIRING INSTANCE VIA WS GATEWAY
+function generate(){
+  const phoneNumberInput = document.getElementById("num").value.trim();
+  if (phoneNumberInput.length < 8) {
+    code.innerText = "BAD-NUMBER";
+    beep();
+    return;
+  }
+  
+  // Reset interface layers
+  code.innerText = "FETCHING...";
+  document.getElementById("qr-container").style.display = "none";
+  beep();
+  
+  // Send creation payload frame down the socket pipe
+  ws.send(JSON.stringify({
+    action: "start_pairing",
+    sessionId: sessionId,
+    phoneNumber: phoneNumberInput,
+    mode: "pairing"
+  }));
+}
+
+// COPY VERIFICATION PARAMETERS
+function copyCode(){
+  if(code.innerText === "------" || code.innerText === "FETCHING...") return;
+  navigator.clipboard.writeText(code.innerText);
+  alert("Code copied to buffer clipboard: " + code.innerText);
+}
+
+// HACK MODE STYLING TOGGLE
+function hackMode(){
+  document.body.classList.toggle("hack");
+}
+
+// BROWSER HARDWARE TELEMETRY INTERFACE
+async function updateStats(){
+  if(navigator.getBattery){
+    const b=await navigator.getBattery();
+    battery.innerText="BAT:"+Math.round(b.level*100)+"%";
+  }
+  if (document.getElementById("net").innerText !== "NET: OFFLINE" && ws.readyState === WebSocket.OPEN) {
+     // Maintain static reading status strings
+  } else if (ws.readyState !== WebSocket.OPEN) {
+     document.getElementById("net").innerText="NET: DISCON";
+  }
+  cpu.innerText="CPU:"+Math.floor(Math.random()*25+15)+"%";
+}
+setInterval(updateStats,3000);
+updateStats();
+</script>
+</body>
+</html>

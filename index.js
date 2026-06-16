@@ -7,41 +7,112 @@ const {
 } = require("@whiskeysockets/baileys");
 const { Boom } = require("@hapi/boom");
 const express = require("express");
+const { createServer } = require("http");
+const { WebSocketServer, WebSocket } = require("ws");
 const pino = require("pino");
-const qrcode = require('qrcode-terminal');
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
 const PORT = process.env.PORT || 3000;
 const prefix = process.env.PREFIX || ".";
-const startTime = Date.now();
 
-// Global Command Registry Map
+// Global registries
 const commands = new Map();
+const activeSessions = new Map(); 
+const wsClients = new Map(); // sessionId -> Set of WebSocket clients
 
 function registerCommand(name, description, category, handler) {
   commands.set(name.toLowerCase(), { name, description, category, handler });
 }
 
-// Dynamically Inject Modular File Registries
+// Load Modules
 require("./general")(registerCommand);
 require("./admin")(registerCommand);
 require("./info")(registerCommand);
 require("./fun")(registerCommand);
 
-// Core Multi-Session Active State Map
-const activeSessions = new Map();
+// Serve your Dashboard UI File
+app.use(express.json());
+app.use(express.static(path.resolve("./wp/public")));
 
-async function startBotInstance(sessionId) {
+app.get("/", (req, res) => {
+  const uiPath = path.resolve("./wp/public/UI.html");
+  if (fs.existsSync(uiPath)) {
+    res.sendFile(uiPath);
+  } else {
+    res.status(404).send("Dashboard UI.html missing at wp/public/UI.html");
+  }
+});
+
+/* ══════════════════════════════════════════════════
+   WEBSOCKET REAL-TIME STREAM GATEWAY
+══════════════════════════════════════════════════ */
+wss.on("connection", (ws) => {
+  let boundSessionId = null;
+
+  ws.on("message", async (message) => {
+    try {
+      const data = JSON.parse(message);
+      
+      if (data.action === "init") {
+        boundSessionId = data.sessionId;
+        if (!wsClients.has(boundSessionId)) wsClients.set(boundSessionId, new Set());
+        wsClients.get(boundSessionId).add(ws);
+        
+        if (activeSessions.has(boundSessionId)) {
+          ws.send(JSON.stringify({ type: "status", status: "CONNECTED" }));
+        }
+      }
+
+      if (data.action === "start_pairing") {
+        const { sessionId, phoneNumber, mode } = data; // mode: 'pairing' or 'qr'
+        boundSessionId = sessionId;
+        
+        if (!wsClients.has(boundSessionId)) wsClients.set(boundSessionId, new Set());
+        wsClients.get(boundSessionId).add(ws);
+
+        initializeWhatsAppInstance(sessionId, phoneNumber, mode);
+      }
+    } catch (err) {
+      ws.send(JSON.stringify({ type: "error", message: err.message }));
+    }
+  });
+
+  ws.on("close", () => {
+    if (boundSessionId && wsClients.has(boundSessionId)) {
+      wsClients.get(boundSessionId).delete(ws);
+    }
+  });
+});
+
+function sendToSession(sessionId, payload) {
+  const clients = wsClients.get(sessionId);
+  if (clients) {
+    const dataString = JSON.stringify(payload);
+    clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(dataString);
+      }
+    });
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   WHATSAPP DYNAMIC SESSION ENGINE
+══════════════════════════════════════════════════ */
+async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
+  const sessionPath = `./auth_info/${sessionId}`;
+  
   if (activeSessions.has(sessionId)) {
-    console.log(`⚠️ [System]: Session '${sessionId}' is already initializing or running.`);
-    return;
+    try { activeSessions.get(sessionId).end(); } catch(_) {}
+    activeSessions.delete(sessionId);
   }
 
-  console.log(`🚀 [System]: Spawning Multi-Device instance for Session ID: ${sessionId}`);
-  
-  // Isolate credentials safely by Session Identifier
-  const { state, saveCreds } = await useMultiFileAuthState(`auth_info/${sessionId}`);
-  
+  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
   const sock = makeWASocket({
     logger: pino({ level: "silent" }),
     auth: state,
@@ -49,101 +120,87 @@ async function startBotInstance(sessionId) {
     browser: Browsers.ubuntu('Chrome')
   });
 
-  // Track active connection reference pointer
   activeSessions.set(sessionId, sock);
-
   sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", (update) => {
+  sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
-    
+
     if (qr) {
-      console.log(`\n⚡ [Session ID: ${sessionId}] Scan this terminal QR code to link device:`);
-      qrcode.generate(qr, { small: true });
+      // Send raw QR to UI fallback handler
+      sendToSession(sessionId, { type: "qr", qr });
     }
-    
+
+    if (connection === "connecting") {
+      sendToSession(sessionId, { type: "status", status: "CONNECTING" });
+    }
+
+    if (connection === "open") {
+      sendToSession(sessionId, { type: "status", status: "CONNECTED" });
+    }
+
     if (connection === "close") {
-      const shouldReconnect = (lastDisconnect?.error instanceof Boom) 
-        ? lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut 
-        : true;
-      
-      console.log(`🔄 [Session ID: ${sessionId}] Disconnected. Attempting automatic recovery: ${shouldReconnect}`);
-      activeSessions.delete(sessionId);
-      
-      if (shouldReconnect) {
-        setTimeout(() => startBotInstance(sessionId), 4000);
+      const reason = lastDisconnect?.error?.output?.statusCode;
+      sendToSession(sessionId, { type: "status", status: "DISCONNECTED" });
+
+      if (reason !== DisconnectReason.loggedOut) {
+        setTimeout(() => initializeWhatsAppInstance(sessionId, phoneNumber, mode), 5000);
+      } else {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        activeSessions.delete(sessionId);
       }
-    } else if (connection === "open") {
-      console.log(`🐅 [Session ID: ${sessionId}] Connected Successfully & Processing Message Buffers.`);
     }
   });
 
+  // Execute Pairing Code Request Flow
+  if (mode === "pairing" && !state.creds.registered) {
+    setTimeout(async () => {
+      try {
+        const cleanNumber = phoneNumber.replace(/[^0-9]/g, "");
+        if (!cleanNumber) {
+          sendToSession(sessionId, { type: "error", message: "Invalid Phone Number Format." });
+          return;
+        }
+        
+        const code = await sock.requestPairingCode(cleanNumber);
+        const formattedCode = code?.match(/.{1,4}/g)?.join("-") || code;
+        sendToSession(sessionId, { type: "code", code: formattedCode });
+      } catch (err) {
+        sendToSession(sessionId, { type: "error", message: "Pairing code timeout. Falling back to QR system." });
+        // Auto Fallback mechanism to QR mode if API fails
+        initializeWhatsAppInstance(sessionId, phoneNumber, "qr");
+      }
+    }, 3000); 
+  }
+
+  // Bind Standard Message Gateway Pipeline
   sock.ev.on("messages.upsert", async (chatUpdate) => {
     try {
       const msg = chatUpdate.messages[0];
       if (!msg.message || msg.key.fromMe) return;
-
       const from = msg.key.remoteJid;
       const isGroup = from.endsWith("@g.us");
-      
-      const body = msg.message.conversation || 
-                   msg.message.extendedTextMessage?.text || "";
-                   
+      const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
       if (!body.startsWith(prefix)) return;
 
       const args = body.slice(prefix.length).trim().split(/ +/);
       const commandName = args.shift().toLowerCase();
-      
       const cmd = commands.get(commandName);
       if (!cmd) return;
 
       const senderNumber = (msg.key.participant || msg.key.remoteJid).split("@")[0];
-
-      // Build session-isolated contextual instance passkey
       const ctx = {
-        sock, // Injects the exact socket connected to this specific text incoming stream
-        msg,
-        jid: from,
-        args,
-        isGroup,
-        senderNumber,
-        prefix,
-        commands,
-        reply: async (text) => {
-          await sock.sendMessage(from, { text }, { quoted: msg });
-        }
+        sock, msg, jid: from, args, isGroup, senderNumber, prefix, commands,
+        reply: async (text) => { await sock.sendMessage(from, { text }, { quoted: msg }); }
       };
-
       await cmd.handler(ctx);
-    } catch (err) {
-      console.error(`❌ Gateway execution exception under Session [${sessionId}]:`, err);
-    }
+    } catch (e) { console.error(e); }
   });
 }
 
-// REST Framework Operations Interface Management
-app.use(express.json());
-
-// API route to inject and pair additional active phone numbers on the fly
-app.get("/api/start", (req, res) => {
-  const { session } = req.query;
-  if (!session) return res.status(400).json({ error: "Missing required 'session' query param." });
-  startBotInstance(session);
-  res.json({ status: "initializing", sessionId: session });
-});
-
+// Active Sessions Status Route
 app.get("/api/status", (req, res) => {
-  res.json({
-    status: "active",
-    uptime: Math.floor((Date.now() - startTime) / 1000),
-    activeSessionsCount: activeSessions.size,
-    runningSessions: Array.from(activeSessions.keys()),
-    totalCommandsLoaded: commands.size
-  });
+  res.json({ status: "online", instances: Array.from(activeSessions.keys()) });
 });
 
-app.listen(PORT, () => {
-  console.log(`🌐 Server dashboard layer open on port: ${PORT}`);
-  // Automatically trigger a default session on script launch
-  startBotInstance("primary");
-});
+server.listen(PORT, () => console.log(`🚀 Master Dashboard Gateway online on port ${PORT}`));
