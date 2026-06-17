@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tora MD iOS Glass UI</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<title>Tora MD Pairing</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
 <style>
 :root{
   --green:#00ff88;
@@ -15,63 +15,66 @@ body{
   margin:0;
   background:#000;
   font-family:'Orbitron', sans-serif;
-  overflow:hidden;
-  transition:background 0.5s;
+  overflow-x:hidden;
+  color:#fff;
 }
 canvas{position:fixed;top:0;left:0;z-index:0;}
-.screen{position:absolute;width:100%;height:100%;display:flex;justify-content:center;align-items:center;z-index:10;transition:0.5s;}
-.hidden{opacity:0;pointer-events:none;}
-.box{background:rgba(255,255,255,0.05);backdrop-filter:blur(15px);border-radius:25px;border:1px solid rgba(255,255,255,0.15);padding:30px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:0.3s;width:320px;}
-.title{font-size:2.5rem;background:linear-gradient(to right,var(--red),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:20px;}
-.jp{position:absolute;left:10px;top:50%;transform:rotate(-90deg) translateY(-50%);color:var(--cyan);opacity:0.6;font-family:'Noto Sans JP',sans-serif;}
-.btn{margin:15px;padding:15px 25px;border-radius:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:var(--green);font-size:1.2rem;cursor:pointer;backdrop-filter:blur(15px);transition:0.3s;}
+.screen{position:relative;width:100%;min-height:100vh;display:flex;justify-content:center;align-items:center;z-index:10;padding:20px 0;}
+.hidden{display:none!important;}
+.box{background:rgba(255,255,255,0.05);backdrop-filter:blur(15px);border-radius:25px;border:1px solid rgba(255,255,255,0.15);padding:30px 25px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:0.3s;width:90%;max-width:380px;}
+.title{font-size:2.2rem;background:linear-gradient(to right,var(--red),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:15px;}
+.btn{margin:10px 5px;padding:14px 20px;border-radius:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:var(--green);font-size:1rem;cursor:pointer;backdrop-filter:blur(15px);transition:0.3s;font-family:'Orbitron',sans-serif;}
 .btn:hover{background:rgba(255,255,255,0.2);color:#fff;box-shadow:0 0 15px var(--green);}
 .btn:disabled{opacity:0.5;cursor:not-allowed;}
-input{width:85%;padding:12px;border:none;border-radius:15px;background:rgba(255,255,255,0.05);color:var(--cyan);text-align:center;font-size:1.2rem;backdrop-filter:blur(15px);margin:15px 0;outline:none;border:1px solid rgba(255,255,255,0.1);}
-.code{font-size:1.5rem;color:var(--green);text-shadow:0 0 10px var(--green);margin-top:10px;font-family:'JetBrains Mono', monospace;letter-spacing:2px;min-height:30px;}
-.copy{cursor:pointer;font-size:1.2rem;margin-left:10px;vertical-align:middle;transition:0.2s;}
+input{width:90%;padding:12px;border:none;border-radius:15px;background:rgba(255,255,255,0.05);color:var(--cyan);text-align:center;font-size:1.1rem;backdrop-filter:blur(15px);margin:12px 0;outline:none;border:1px solid rgba(255,255,255,0.1);}
+.code{font-size:1.6rem;color:var(--green);text-shadow:0 0 10px var(--green);margin:15px 0;font-family:'JetBrains Mono', monospace;letter-spacing:3px;min-height:35px;word-break:break-all;}
+.copy{cursor:pointer;font-size:1.3rem;margin-left:8px;vertical-align:middle;transition:0.2s;}
 .copy:active{transform:scale(0.8);}
-#qr-container{margin:20px auto 10px auto;padding:15px;background:rgba(0,0,0,0.5);border-radius:20px;border:1px solid rgba(255,255,255,0.1);width:180px;height:180px;display:none;justify-content:center;align-items:center;}
-#qr-container img{border-radius:12px;border:2px solid var(--cyan);box-shadow:0 0 15px var(--cyan);}
-.stats{display:flex;justify-content:space-between;font-size:0.8rem;color:var(--green);margin-top:20px;}
-.hack body,.hack.box{background:#300000!important;color:#ff5555!important;box-shadow:0 0 30px #ff0000!important;}
-.hack.btn{color:#ff5555!important;border-color:#ff5555!important;}
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:10px 20px;border-radius:10px;font-size:0.9rem;opacity:0;transition:0.3s;z-index:999;}
+.stats{display:flex;justify-content:space-between;font-size:0.75rem;color:var(--green);margin-top:15px;flex-wrap:wrap;}
+.status-box{margin-top:15px;padding:12px;background:rgba(0,255,136,0.1);border-radius:12px;border:1px solid var(--green);font-size:0.8rem;text-align:left;display:none;}
+.status-box.show{display:block;}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:10px 20px;border-radius:10px;font-size:0.85rem;opacity:0;transition:0.3s;z-index:999;}
 .toast.show{opacity:1;}
+.instructions{font-size:0.75rem;color:#aaa;text-align:left;margin-top:15px;line-height:1.6;}
+.instructions b{color:var(--cyan);}
+#qr-container{margin:15px auto;padding:12px;background:rgba(0,0,0,0.5);border-radius:20px;border:1px solid rgba(255,255,255,0.1);width:160px;height:160px;display:none;justify-content:center;align-items:center;}
+#qr-container img{border-radius:12px;border:2px solid var(--cyan);box-shadow:0 0 15px var(--cyan);}
 </style>
 </head>
 <body>
 
 <canvas id="matrix"></canvas>
-<div class="jp">接続 システム</div>
 <div class="toast" id="toast">Copied!</div>
 
-<div class="screen" id="main">
+<div class="screen" id="pair">
   <div class="box">
-    <div class="title">Tora MD</div>
-    <div class="btn" onclick="openPair()">🔗 ペアリング</div>
-    <div class="btn" onclick="contact()">👤 オーナーに連絡</div>
-    <div class="btn" onclick="hackMode()">💀 ハッカーモード</div>
-    <div class="stats">
-      <span id="battery">BAT: --</span>
-      <span id="net">NET: CONNECTING</span>
-    </div>
-  </div>
-</div>
+    <div class="title">TORA MD PAIR</div>
+    <input id="num" placeholder="9477xxxxxxx" maxlength="12">
 
-<div class="screen hidden" id="pair">
-  <div class="box">
-    <div class="title">ペアリング</div>
-    <input id="num" placeholder="947xxxxxxx">
     <div>
       <span class="code" id="code">------</span>
       <span class="copy" onclick="copyCode()">📋</span>
     </div>
+
     <div id="qr-container"></div>
-    <div class="btn" id="genBtn" onclick="generate()">生成</div>
-    <div class="btn" onclick="back()">← 戻る</div>
+
+    <div>
+      <div class="btn" id="genBtn" onclick="generate()">GENERATE CODE</div>
+      <div class="btn" onclick="openWhatsApp()">OPEN WHATSAPP</div>
+    </div>
+
+    <div class="status-box" id="statusBox"></div>
+
+    <div class="instructions" id="instructions">
+      <b>STEP 1:</b> උඩ number එක දාලා GENERATE ගහන්න<br>
+      <b>STEP 2:</b> ආපු 8-digit code එක copy කරන්න<br>
+      <b>STEP 3:</b> WhatsApp > Settings > Linked Devices > Link a Device<br>
+      <b>STEP 4:</b> "Link with phone number" tap කරලා code එක දාන්න<br><br>
+      <span style="color:var(--red)">⚠️ Notification නැත්තම් STEP 4 එක manual කරන්න</span>
+    </div>
+
     <div class="stats">
-      <span id="cpu">CPU: --</span>
+      <span id="net">NET: CONNECTING</span>
       <span id="ping">STATE: IDLE</span>
     </div>
   </div>
@@ -82,32 +85,29 @@ const c=document.getElementById("matrix");
 const ctx=c.getContext("2d");
 c.width=innerWidth;
 c.height=innerHeight;
-const letters="ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿ1234567890接続TORA";
-const drops=Array(Math.floor(c.width/15)).fill(1);
+const letters="ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿ1234567890TORA";
+const drops=Array(Math.floor(c.width/14)).fill(1);
 setInterval(()=>{
   ctx.fillStyle="rgba(0,0,0,0.05)";
   ctx.fillRect(0,0,c.width,c.height);
   ctx.fillStyle="#0f8";
-  ctx.font="15px monospace";
+  ctx.font="14px monospace";
   drops.forEach((y,i)=>{
     const t=letters[Math.floor(Math.random()*letters.length)];
-    ctx.fillText(t,i*15,y*15);
-    drops[i]=y*15>c.height?0:y+1;
+    ctx.fillText(t,i*14,y*14);
+    drops[i]=y*14>c.height?0:y+1;
   });
 },33);
 window.addEventListener('resize',()=>{c.width=innerWidth;c.height=innerHeight;});
 
-const main=document.getElementById("main");
-const pair=document.getElementById("pair");
 const code=document.getElementById("code");
-const battery=document.getElementById("battery");
-const cpu=document.getElementById("cpu");
 const genBtn=document.getElementById("genBtn");
 const toast=document.getElementById("toast");
+const statusBox=document.getElementById("statusBox");
 
-function openPair(){main.classList.add("hidden");pair.classList.remove("hidden");beep();}
-function back(){pair.classList.add("hidden");main.classList.remove("hidden");beep();}
-function contact(){window.open("https://wa.me/+94781864250?text=Hello_ToraMD_Owner");}
+let ws;
+let currentCode="";
+const sessionId="tora_"+Math.random().toString(36).substring(2,9);
 
 function beep(){
   try{
@@ -127,18 +127,25 @@ function showToast(msg){
   setTimeout(()=>toast.classList.remove('show'),2000);
 }
 
+function showStatus(msg){
+  statusBox.innerHTML=msg;
+  statusBox.classList.add('show');
+}
+
 function typeCode(text){
+  currentCode=text;
   let i=0;code.innerText="";
   const interval=setInterval(()=>{
     code.innerText+=text[i];
     beep();
     i++;
-    if(i>=text.length) clearInterval(interval);
+    if(i>=text.length){
+      clearInterval(interval);
+      showStatus(`✅ Code: <b>${text}</b><br>📋 Auto copied!<br>🔗 WhatsApp open කරලා code එක paste කරන්න`);
+      navigator.clipboard.writeText(text);
+    }
   },80);
 }
-
-let ws;
-const sessionId="tora_"+Math.random().toString(36).substring(2,9);
 
 function connectWS(){
   const protocol=window.location.protocol==="https:"?"wss:":"ws:";
@@ -155,13 +162,10 @@ function connectWS(){
     const data=JSON.parse(event.data);
     console.log("WS Parsed:",data);
 
-    // FIX: Handle both 'pairing_code' from backend and 'code' from frontend
     let type=data.type;
     let codeValue=data.code||data.message;
 
-    if(type==="pairing_code"){
-      type="code";
-    }
+    if(type==="pairing_code"){type="code";}
 
     if(type==="code"){
       document.getElementById("qr-container").style.display="none";
@@ -169,7 +173,7 @@ function connectWS(){
       typeCode(codeValue);
       document.getElementById("ping").innerText="STATE: CODE READY";
       genBtn.disabled=false;
-      genBtn.innerText="Regenerate";
+      genBtn.innerText="REGENERATE";
     }
 
     if(type==="qr"){
@@ -181,7 +185,6 @@ function connectWS(){
       qrBox.innerHTML=`<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(codeValue)}&color=00f2ff&bgcolor=000" alt="QR"/>`;
       beep();
       genBtn.disabled=false;
-      genBtn.innerText="Regenerate";
     }
 
     if(type==="status"){
@@ -190,13 +193,15 @@ function connectWS(){
 
     if(type==="error"){
       if(data.message.toLowerCase().includes("timeout")){
-        document.getElementById("ping").innerText="STATE: TIMEOUT FALLBACK";
+        document.getElementById("ping").innerText="STATE: TIMEOUT";
+        showStatus("⚠️ Code timeout. ආපහු GENERATE ගහන්න");
       }else{
-        code.innerText="ERR-RETRY";
+        code.innerText="ERR";
         document.getElementById("ping").innerText=`ERR: ${data.message}`;
+        showStatus(`❌ Error: ${data.message}`);
       }
       genBtn.disabled=false;
-      genBtn.innerText="Try Again";
+      genBtn.innerText="TRY AGAIN";
     }
   };
 
@@ -217,14 +222,16 @@ function generate(){
   if(phoneNumberInput.length<8){
     code.innerText="BAD-NUMBER";
     beep();
+    showStatus("❌ Valid number එකක් දාන්න. Ex: 9477xxxxxxx");
     return;
   }
 
   code.innerText="FETCHING...";
   code.style.display="inline-block";
   document.getElementById("qr-container").style.display="none";
+  statusBox.classList.remove('show');
   genBtn.disabled=true;
-  genBtn.innerText="Requesting...";
+  genBtn.innerText="REQUESTING...";
   beep();
 
   if(ws&&ws.readyState===WebSocket.OPEN){
@@ -237,27 +244,22 @@ function generate(){
   }else{
     code.innerText="NO-CONNECT";
     genBtn.disabled=false;
-    genBtn.innerText="Retry";
+    genBtn.innerText="RETRY";
+    showStatus("❌ WebSocket connect නෑ. Page refresh කරන්න");
   }
 }
 
 function copyCode(){
-  if(code.innerText==="------"||code.innerText==="FETCHING..."||code.innerText==="QR READY"||code.innerText.includes("ERR"))return;
-  navigator.clipboard.writeText(code.innerText);
-  showToast("Copied: "+code.innerText);
+  if(!currentCode||currentCode==="------"||currentCode==="FETCHING...")return;
+  navigator.clipboard.writeText(currentCode);
+  showToast("Copied: "+currentCode);
 }
 
-function hackMode(){document.body.classList.toggle("hack");}
-
-async function updateStats(){
-  if(navigator.getBattery){
-    const b=await navigator.getBattery();
-    battery.innerText="BAT:"+Math.round(b.level*100)+"%";
-  }
-  cpu.innerText="CPU:"+Math.floor(Math.random()*25+15)+"%";
+function openWhatsApp(){
+  const phone="94781864250";
+  const msg=encodeURIComponent(`Pairing code: ${currentCode}\n\nSettings > Linked Devices > Link a Device > Link with phone number`);
+  window.open(`https://wa.me/${phone}?text=${msg}`,'_blank');
 }
-setInterval(updateStats,3000);
-updateStats();
 
 window.onload=connectWS;
 </script>
