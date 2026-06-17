@@ -16,11 +16,11 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3000;
-const prefix = process.env.PREFIX || ".";
+const sessionIdentifier = "tora_session";
 
 const activeSessions = new Map(); 
 const wsClients = new Map(); 
-const sessionIdentifier = "tora_session";
+const connectionDelayTimers = new Map();
 
 app.use(express.json());
 
@@ -31,7 +31,7 @@ app.get("/", (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tora MD | Gateway</title>
+    <title>Tora MD Engine</title>
     <style>
         :root {
             --bg-color: #05070f; --card-bg: #0c1020; --primary: #00ffcc;
@@ -58,7 +58,7 @@ app.get("/", (req, res) => {
         .qr-display img { display: block; max-width: 220px; height: auto; }
         .code-display { display: none; margin-top: 25px; padding: 20px; background-color: var(--terminal-bg); border: 2px dashed var(--primary); border-radius: 18px; }
         .code-display h2 { font-size: 32px; letter-spacing: 6px; color: var(--text-main); margin: 8px 0; text-shadow: 0 0 8px rgba(255,255,255,0.2); }
-        .terminal { margin-top: 25px; background-color: var(--terminal-bg); border-radius: 18px; padding: 15px; height: 130px; overflow-y: auto; text-align: left; font-family: monospace; font-size: 11px; border: 1px solid #1e293b; color: #a7f3d0; }
+        .terminal { margin-top: 25px; background-color: var(--terminal-bg); border-radius: 18px; padding: 15px; height: 140px; overflow-y: auto; text-align: left; font-family: monospace; font-size: 11px; border: 1px solid #1e293b; color: #a7f3d0; }
         .log-entry { margin-bottom: 4px; } .log-success { color: var(--success); } .log-error { color: var(--error); }
         .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: var(--error); }
         .status-dot.connected { background-color: var(--success); box-shadow: 0 0 8px var(--success); }
@@ -91,7 +91,7 @@ app.get("/", (req, res) => {
             </div>
         </div>
 
-        <div class="terminal" id="terminal"><div class="log-entry">System ready. Select a verification method...</div></div>
+        <div class="terminal" id="terminal"><div class="log-entry">System clean. Ready to verify...</div></div>
     </div>
 
     <script>
@@ -127,7 +127,7 @@ app.get("/", (req, res) => {
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'status') {
-                        appendLog('Engine Connection State: ' + data.status);
+                        appendLog('State: ' + data.status);
                         if (data.status === 'CONNECTED') {
                             pairBtn.innerText = "Linked!"; qrBtn.innerText = "Linked!";
                             pairBtn.disabled = false; qrBtn.disabled = false;
@@ -143,11 +143,11 @@ app.get("/", (req, res) => {
                         qrBtn.disabled = false; qrBtn.innerText = "Get QR Code";
                     } else if (data.type === 'code') {
                         codeBox.style.display = 'block'; pairingCodeText.innerText = data.code;
-                        appendLog('Pairing token established.', 'success'); pairBtn.disabled = false; pairBtn.innerText = "Regenerate Code";
+                        appendLog('Pairing Code Generated!', 'success'); pairBtn.disabled = false; pairBtn.innerText = "Regenerate Code";
                     } else if (data.type === 'qr') {
                         qrBox.style.display = 'block';
                         qrImage.src = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent(data.qr);
-                        appendLog('New matrix QR signature received.', 'success'); qrBtn.disabled = false; qrBtn.innerText = "Refresh QR";
+                        appendLog('New QR signature received.', 'success'); qrBtn.disabled = false; qrBtn.innerText = "Refresh QR";
                     }
                 } catch(e){}
             };
@@ -161,13 +161,13 @@ app.get("/", (req, res) => {
             let num = '';
             if (mode === 'pairing') {
                 num = phoneInput.value.replace(/[^0-9]/g, '');
-                if(!num) return appendLog('Please input a valid phone configuration.', 'error');
+                if(!num) return appendLog('Please enter a valid phone number.', 'error');
             }
             if (ws && ws.readyState === WebSocket.OPEN) {
                 qrBox.style.display = 'none'; codeBox.style.display = 'none';
                 ws.send(JSON.stringify({ action: 'start_pairing', sessionId: sessionIdentifier, phoneNumber: num, mode: mode }));
-                if(mode === 'pairing') { pairBtn.disabled = true; pairBtn.innerText = "Generating..."; }
-                if(mode === 'qr') { qrBtn.disabled = true; qrBtn.innerText = "Generating..."; }
+                if(mode === 'pairing') { pairBtn.disabled = true; pairBtn.innerText = "Requesting System..."; }
+                if(mode === 'qr') { qrBtn.disabled = true; qrBtn.innerText = "Requesting QR..."; }
             }
         }
         window.onload = connectWebSocket;
@@ -212,7 +212,12 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   const sessionPath = `./auth_info/${sessionId}`;
   if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
 
-  // Safety Shield: Completely remove old event listeners before killing previous instance
+  // Clear pending loop retry timeouts to prevent memory leaks
+  if (connectionDelayTimers.has(sessionId)) {
+    clearTimeout(connectionDelayTimers.get(sessionId));
+    connectionDelayTimers.delete(sessionId);
+  }
+
   if (activeSessions.has(sessionId)) {
     try { 
       const oldSock = activeSessions.get(sessionId);
@@ -244,16 +249,17 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
       
-      // If our current active instance is still this socket, handle re-connection safely
       if (activeSessions.get(sessionId) === sock) {
         sendToSession(sessionId, { type: "status", status: "DISCONNECTED" });
+        
         if (reason !== DisconnectReason.loggedOut) {
-          setTimeout(() => {
-            // Verify another manual initialization hasn't replaced us in the background
+          // Throttled linear delay instead of instantaneous firing prevents loop of death
+          const retryTimer = setTimeout(() => {
             if (activeSessions.get(sessionId) === sock) {
               initializeWhatsAppInstance(sessionId, phoneNumber, mode);
             }
-          }, 5000);
+          }, 8000);
+          connectionDelayTimers.set(sessionId, retryTimer);
         } else {
           fs.rmSync(sessionPath, { recursive: true, force: true });
           activeSessions.delete(sessionId);
@@ -272,11 +278,11 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
         }
       } catch (err) {
         if (activeSessions.get(sessionId) === sock) {
-          sendToSession(sessionId, { type: "error", message: "Pairing code acquisition timeout." });
+          sendToSession(sessionId, { type: "error", message: "Pairing code request timed out." });
         }
       }
-    }, 3000); 
+    }, 4000); 
   }
 }
 
-server.listen(PORT, () => console.log(`🚀 Clean Engine Running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Master Dashboard Gateway online on port ${PORT}`));
