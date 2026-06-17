@@ -74,7 +74,7 @@ canvas{
   font-family:'Noto Sans JP',sans-serif;
 }
 
-/* BUTTONS - iOS Glass Style */
+/* BUTTONS */
 .btn{
   margin:15px;
   padding:15px 25px;
@@ -200,7 +200,6 @@ input{
       <span class="copy" onclick="copyCode()">📋</span>
     </div>
     
-    <!-- Dynamic QR Fallback box (Hidden by Default) -->
     <div id="qr-container" style="display: none;"></div>
 
     <div class="btn" onclick="generate()">生成</div>
@@ -213,7 +212,6 @@ input{
 </div>
 
 <script>
-// MATRIX BACKGROUND ENGINE
 const c=document.getElementById("matrix");
 const ctx=c.getContext("2d");
 c.width=innerWidth;
@@ -237,12 +235,10 @@ window.addEventListener('resize', () => {
   c.height = innerHeight;
 });
 
-// SYSTEM NAVIGATION
 function openPair(){main.classList.add("hidden");pair.classList.remove("hidden");beep();}
 function back(){pair.classList.add("hidden");main.classList.remove("hidden");beep();}
 function contact(){window.open("https://wa.me/+94781864250?text=Hello_ToraMD_Owner");}
 
-// UI AUDIO FEEDBACK SYSTEM
 function beep(){
   try {
     let ctxAudio=new (window.AudioContext || window.webkitAudioContext)();
@@ -255,7 +251,6 @@ function beep(){
   } catch(e) {}
 }
 
-// DIGITAL TYPEWRITER EFFECT
 function typeCode(text){
   let i=0;code.innerText="";
   const interval=setInterval(()=>{
@@ -266,15 +261,11 @@ function typeCode(text){
   },80);
 }
 
-// REAL-TIME WEBSOCKET INFRASTRUCTURE INTEGRATION
 const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 const ws = new WebSocket(`${protocol}//${window.location.host}`);
-
-// Create an isolated dynamic runtime session tracking key for this panel user
 const sessionId = "tora_" + Math.random().toString(36).substring(2, 9);
 
 ws.onopen = () => {
-  console.log("WebSocket linked to Core Engine. Session initiated:", sessionId);
   ws.send(JSON.stringify({ action: "init", sessionId: sessionId }));
   document.getElementById("net").innerText = "NET: ONLINE";
 };
@@ -282,31 +273,32 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   
-  // 1. Handle code stream reception
   if (data.type === "code") {
     document.getElementById("qr-container").style.display = "none"; 
     typeCode(data.code);
   }
   
-  // 2. Handle QR fallback rendering
   if (data.type === "qr") {
-    code.innerText = "TIMEOUT FALLBACK";
+    code.innerText = "QR READY";
+    document.getElementById("ping").innerText = "STATE: SCAN QR";
     const qrBox = document.getElementById("qr-container");
     qrBox.style.display = "flex";
-    // Generates a matrix-matched cyan stylized block layout
     qrBox.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(data.qr)}&color=00f2ff&bgcolor=000000" alt="QR Code" />`;
     beep();
   }
   
-  // 3. Update runtime execution metrics states
   if (data.type === "status") {
     document.getElementById("ping").innerText = `STATE: ${data.status}`;
   }
   
-  // 4. Handle connection exceptions safely
+  // Clean handling of timeouts without throwing disruptive alert dialog popups
   if (data.type === "error") {
-    code.innerText = "ERR-RETRY";
-    alert("Engine Exception Framework Alert: " + data.message);
+    if (data.message.includes("timeout") || data.message.includes("Fallback")) {
+      document.getElementById("ping").innerText = "STATE: TIMEOUT FALLBACK";
+    } else {
+      code.innerText = "ERR-RETRY";
+      document.getElementById("ping").innerText = `ERR: ${data.message}`;
+    }
   }
 };
 
@@ -315,7 +307,6 @@ ws.onclose = () => {
   document.getElementById("ping").innerText = "STATE: CLOSED";
 };
 
-// INITIALIZE BOT PAIRING INSTANCE VIA WS GATEWAY
 function generate(){
   const phoneNumberInput = document.getElementById("num").value.trim();
   if (phoneNumberInput.length < 8) {
@@ -324,12 +315,10 @@ function generate(){
     return;
   }
   
-  // Reset interface layers
   code.innerText = "FETCHING...";
   document.getElementById("qr-container").style.display = "none";
   beep();
   
-  // Send creation payload frame down the socket pipe
   ws.send(JSON.stringify({
     action: "start_pairing",
     sessionId: sessionId,
@@ -338,28 +327,20 @@ function generate(){
   }));
 }
 
-// COPY VERIFICATION PARAMETERS
 function copyCode(){
-  if(code.innerText === "------" || code.innerText === "FETCHING...") return;
+  if(code.innerText === "------" || code.innerText === "FETCHING..." || code.innerText === "QR READY") return;
   navigator.clipboard.writeText(code.innerText);
   alert("Code copied to buffer clipboard: " + code.innerText);
 }
 
-// HACK MODE STYLING TOGGLE
 function hackMode(){
   document.body.classList.toggle("hack");
 }
 
-// BROWSER HARDWARE TELEMETRY INTERFACE
 async function updateStats(){
   if(navigator.getBattery){
     const b=await navigator.getBattery();
     battery.innerText="BAT:"+Math.round(b.level*100)+"%";
-  }
-  if (document.getElementById("net").innerText !== "NET: OFFLINE" && ws.readyState === WebSocket.OPEN) {
-     // Maintain static reading status strings
-  } else if (ws.readyState !== WebSocket.OPEN) {
-     document.getElementById("net").innerText="NET: DISCON";
   }
   cpu.innerText="CPU:"+Math.floor(Math.random()*25+15)+"%";
 }
