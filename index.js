@@ -35,16 +35,15 @@ require("./admin")(registerCommand);
 require("./info")(registerCommand);
 require("./fun")(registerCommand);
 
-// Serve your Dashboard UI File
 app.use(express.json());
-app.use(express.static(path.resolve("./wp/public")));
 
+// SAFELY serve UI.html from the root folder without exposing sensitive files
 app.get("/", (req, res) => {
-  const uiPath = path.resolve("./wp/public/UI.html");
+  const uiPath = path.resolve("./UI.html");
   if (fs.existsSync(uiPath)) {
     res.sendFile(uiPath);
   } else {
-    res.status(404).send("Dashboard UI.html missing at wp/public/UI.html");
+    res.status(404).send("Dashboard UI.html missing at root directory");
   }
 });
 
@@ -69,7 +68,7 @@ wss.on("connection", (ws) => {
       }
 
       if (data.action === "start_pairing") {
-        const { sessionId, phoneNumber, mode } = data; // mode: 'pairing' or 'qr'
+        const { sessionId, phoneNumber, mode } = data;
         boundSessionId = sessionId;
         
         if (!wsClients.has(boundSessionId)) wsClients.set(boundSessionId, new Set());
@@ -127,7 +126,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      // Send raw QR to UI fallback handler
       sendToSession(sessionId, { type: "qr", qr });
     }
 
@@ -152,7 +150,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
     }
   });
 
-  // Execute Pairing Code Request Flow
   if (mode === "pairing" && !state.creds.registered) {
     setTimeout(async () => {
       try {
@@ -167,13 +164,11 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
         sendToSession(sessionId, { type: "code", code: formattedCode });
       } catch (err) {
         sendToSession(sessionId, { type: "error", message: "Pairing code timeout. Falling back to QR system." });
-        // Auto Fallback mechanism to QR mode if API fails
         initializeWhatsAppInstance(sessionId, phoneNumber, "qr");
       }
     }, 3000); 
   }
 
-  // Bind Standard Message Gateway Pipeline
   sock.ev.on("messages.upsert", async (chatUpdate) => {
     try {
       const msg = chatUpdate.messages[0];
@@ -198,7 +193,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   });
 }
 
-// Active Sessions Status Route
 app.get("/api/status", (req, res) => {
   res.json({ status: "online", instances: Array.from(activeSessions.keys()) });
 });
