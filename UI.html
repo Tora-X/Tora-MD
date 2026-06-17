@@ -21,7 +21,7 @@ body{
 canvas{position:fixed;top:0;left:0;z-index:0;}
 .screen{position:absolute;width:100%;height:100%;display:flex;justify-content:center;align-items:center;z-index:10;transition:0.5s;}
 .hidden{opacity:0;pointer-events:none;}
-.box{background:rgba(255,255,255,0.05);backdrop-filter:blur(15px);border-radius:25px;border:1px solid rgba(255,255,255,0.15);padding:30px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:0.3s;width: 320px;}
+.box{background:rgba(255,255,255,0.05);backdrop-filter:blur(15px);border-radius:25px;border:1px solid rgba(255,255,255,0.15);padding:30px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:0.3s;width:320px;}
 .title{font-size:2.5rem;background:linear-gradient(to right,var(--red),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:20px;}
 .jp{position:absolute;left:10px;top:50%;transform:rotate(-90deg) translateY(-50%);color:var(--cyan);opacity:0.6;font-family:'Noto Sans JP',sans-serif;}
 .btn{margin:15px;padding:15px 25px;border-radius:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:var(--green);font-size:1.2rem;cursor:pointer;backdrop-filter:blur(15px);transition:0.3s;}
@@ -88,44 +88,43 @@ setInterval(()=>{
   ctx.fillStyle="rgba(0,0,0,0.05)";
   ctx.fillRect(0,0,c.width,c.height);
   ctx.fillStyle="#0f8";
-  ctx.font = "15px monospace";
+  ctx.font="15px monospace";
   drops.forEach((y,i)=>{
     const t=letters[Math.floor(Math.random()*letters.length)];
     ctx.fillText(t,i*15,y*15);
     drops[i]=y*15>c.height?0:y+1;
   });
 },33);
-window.addEventListener('resize', () => {c.width=innerWidth;c.height=innerHeight;});
+window.addEventListener('resize',()=>{c.width=innerWidth;c.height=innerHeight;});
 
-// FIX: Get all elements properly
-const main = document.getElementById("main");
-const pair = document.getElementById("pair");
-const code = document.getElementById("code");
-const battery = document.getElementById("battery");
-const cpu = document.getElementById("cpu");
-const genBtn = document.getElementById("genBtn");
-const toast = document.getElementById("toast");
+const main=document.getElementById("main");
+const pair=document.getElementById("pair");
+const code=document.getElementById("code");
+const battery=document.getElementById("battery");
+const cpu=document.getElementById("cpu");
+const genBtn=document.getElementById("genBtn");
+const toast=document.getElementById("toast");
 
 function openPair(){main.classList.add("hidden");pair.classList.remove("hidden");beep();}
 function back(){pair.classList.add("hidden");main.classList.remove("hidden");beep();}
 function contact(){window.open("https://wa.me/+94781864250?text=Hello_ToraMD_Owner");}
 
 function beep(){
-  try {
-    let ctxAudio=new (window.AudioContext || window.webkitAudioContext)();
+  try{
+    let ctxAudio=new (window.AudioContext||window.webkitAudioContext)();
     let osc=ctxAudio.createOscillator();
     osc.type='sine';
-    osc.frequency.setValueAtTime(800, ctxAudio.currentTime);
+    osc.frequency.setValueAtTime(800,ctxAudio.currentTime);
     osc.connect(ctxAudio.destination);
     osc.start();
     osc.stop(ctxAudio.currentTime+0.05);
-  } catch(e) {}
+  }catch(e){}
 }
 
 function showToast(msg){
-  toast.innerText = msg;
+  toast.innerText=msg;
   toast.classList.add('show');
-  setTimeout(()=>toast.classList.remove('show'), 2000);
+  setTimeout(()=>toast.classList.remove('show'),2000);
 }
 
 function typeCode(text){
@@ -139,97 +138,113 @@ function typeCode(text){
 }
 
 let ws;
-const sessionId = "tora_" + Math.random().toString(36).substring(2, 9);
+const sessionId="tora_"+Math.random().toString(36).substring(2,9);
 
 function connectWS(){
-  const protocol = window.location.protocol === "https:"? "wss:" : "ws:";
-  ws = new WebSocket(`${protocol}//${window.location.host}`);
+  const protocol=window.location.protocol==="https:"?"wss:":"ws:";
+  ws=new WebSocket(`${protocol}//${window.location.host}`);
 
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ action: "init", sessionId: sessionId }));
-    document.getElementById("net").innerText = "NET: ONLINE";
+  ws.onopen=()=>{
+    ws.send(JSON.stringify({action:"init",sessionId:sessionId}));
+    document.getElementById("net").innerText="NET: ONLINE";
+    document.getElementById("ping").innerText="STATE: READY";
   };
 
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
+  ws.onmessage=(event)=>{
+    console.log("WS Raw:",event.data);
+    const data=JSON.parse(event.data);
+    console.log("WS Parsed:",data);
 
-    if (data.type === "code") {
-      document.getElementById("qr-container").style.display = "none";
-      code.style.display = "inline-block";
-      typeCode(data.code);
-      document.getElementById("ping").innerText = "STATE: CODE READY";
-      genBtn.disabled = false;
-      genBtn.innerText = "Regenerate";
+    // FIX: Handle both 'pairing_code' from backend and 'code' from frontend
+    let type=data.type;
+    let codeValue=data.code||data.message;
+
+    if(type==="pairing_code"){
+      type="code";
     }
 
-    if (data.type === "qr") {
-      code.style.display = "none";
-      code.innerText = "QR READY";
-      document.getElementById("ping").innerText = "STATE: SCAN QR";
-      const qrBox = document.getElementById("qr-container");
-      qrBox.style.display = "flex";
-      qrBox.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(data.qr)}&color=00f2ff&bgcolor=000" alt="QR Code" />`;
+    if(type==="code"){
+      document.getElementById("qr-container").style.display="none";
+      code.style.display="inline-block";
+      typeCode(codeValue);
+      document.getElementById("ping").innerText="STATE: CODE READY";
+      genBtn.disabled=false;
+      genBtn.innerText="Regenerate";
+    }
+
+    if(type==="qr"){
+      code.style.display="none";
+      code.innerText="QR READY";
+      document.getElementById("ping").innerText="STATE: SCAN QR";
+      const qrBox=document.getElementById("qr-container");
+      qrBox.style.display="flex";
+      qrBox.innerHTML=`<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(codeValue)}&color=00f2ff&bgcolor=000" alt="QR"/>`;
       beep();
-      genBtn.disabled = false;
-      genBtn.innerText = "Regenerate";
+      genBtn.disabled=false;
+      genBtn.innerText="Regenerate";
     }
 
-    if (data.type === "status") {
-      document.getElementById("ping").innerText = `STATE: ${data.status}`;
+    if(type==="status"){
+      document.getElementById("ping").innerText=`STATE: ${data.status}`;
     }
 
-    if (data.type === "error") {
-      if (data.message.toLowerCase().includes("timeout")) {
-        document.getElementById("ping").innerText = "STATE: TIMEOUT FALLBACK";
-      } else {
-        code.innerText = "ERR-RETRY";
-        document.getElementById("ping").innerText = `ERR: ${data.message}`;
+    if(type==="error"){
+      if(data.message.toLowerCase().includes("timeout")){
+        document.getElementById("ping").innerText="STATE: TIMEOUT FALLBACK";
+      }else{
+        code.innerText="ERR-RETRY";
+        document.getElementById("ping").innerText=`ERR: ${data.message}`;
       }
-      genBtn.disabled = false;
-      genBtn.innerText = "Try Again";
+      genBtn.disabled=false;
+      genBtn.innerText="Try Again";
     }
   };
 
-  ws.onclose = () => {
-    document.getElementById("net").innerText = "NET: OFFLINE";
-    document.getElementById("ping").innerText = "STATE: CLOSED";
-    setTimeout(connectWS, 3000); // FIX: Auto reconnect
+  ws.onclose=()=>{
+    document.getElementById("net").innerText="NET: OFFLINE";
+    document.getElementById("ping").innerText="STATE: CLOSED";
+    setTimeout(connectWS,3000);
+  };
+
+  ws.onerror=(e)=>{
+    console.error("WS Error:",e);
+    document.getElementById("ping").innerText="STATE: WS ERROR";
   };
 }
 
 function generate(){
-  const phoneNumberInput = document.getElementById("num").value.trim().replace(/[^0-9]/g, '');
-  if (phoneNumberInput.length < 8) {
-    code.innerText = "BAD-NUMBER";
+  const phoneNumberInput=document.getElementById("num").value.trim().replace(/[^0-9]/g,'');
+  if(phoneNumberInput.length<8){
+    code.innerText="BAD-NUMBER";
     beep();
     return;
   }
 
-  code.innerText = "FETCHING...";
-  code.style.display = "inline-block";
-  document.getElementById("qr-container").style.display = "none";
-  genBtn.disabled = true;
-  genBtn.innerText = "Requesting...";
+  code.innerText="FETCHING...";
+  code.style.display="inline-block";
+  document.getElementById("qr-container").style.display="none";
+  genBtn.disabled=true;
+  genBtn.innerText="Requesting...";
   beep();
 
-  if(ws && ws.readyState === WebSocket.OPEN){
+  if(ws&&ws.readyState===WebSocket.OPEN){
     ws.send(JSON.stringify({
-      action: "start_pairing",
-      sessionId: sessionId,
-      phoneNumber: phoneNumberInput,
-      mode: "pairing"
+      action:"start_pairing",
+      sessionId:sessionId,
+      phoneNumber:phoneNumberInput,
+      mode:"pairing"
     }));
-  } else {
-    code.innerText = "NO-CONNECT";
-    genBtn.disabled = false;
-    genBtn.innerText = "Retry";
+  }else{
+    code.innerText="NO-CONNECT";
+    genBtn.disabled=false;
+    genBtn.innerText="Retry";
   }
 }
 
 function copyCode(){
-  if(code.innerText === "------" || code.innerText === "FETCHING..." || code.innerText === "QR READY" || code.innerText.includes("ERR")) return;
+  if(code.innerText==="------"||code.innerText==="FETCHING..."||code.innerText==="QR READY"||code.innerText.includes("ERR"))return;
   navigator.clipboard.writeText(code.innerText);
-  showToast("Code copied: " + code.innerText); // FIX: No alert
+  showToast("Copied: "+code.innerText);
 }
 
 function hackMode(){document.body.classList.toggle("hack");}
@@ -244,8 +259,7 @@ async function updateStats(){
 setInterval(updateStats,3000);
 updateStats();
 
-// FIX: Initialize WS on load
-window.onload = connectWS;
+window.onload=connectWS;
 </script>
 </body>
 </html>
