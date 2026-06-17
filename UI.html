@@ -1,216 +1,251 @@
-require('dotenv').config();
-const { 
-  default: makeWASocket, 
-  useMultiFileAuthState, 
-  DisconnectReason,
-  Browsers
-} = require("@whiskeysockets/baileys");
-const express = require("express");
-const { createServer } = require("http");
-const { WebSocketServer, WebSocket } = require("ws");
-const pino = require("pino");
-const fs = require("fs");
-
-const app = express();
-const server = createServer(app);
-const wss = new WebSocketServer({ server });
-
-const PORT = process.env.PORT || 3000;
-const prefix = process.env.PREFIX || ".";
-
-const activeSessions = new Map(); 
-const wsClients = new Map(); 
-const sessionIdentifier = "tora_session";
-
-app.use(express.json());
-
-// 🛠️ SERVE THE HTML DIRECTLY AS A STRING (No UI.html file needed anymore)
-app.get("/", (req, res) => {
-  res.send(`
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tora MD | Device Pairing</title>
-    <style>
-        :root {
-            --bg-color: #0f172a; --card-bg: #1e293b; --primary: #f59e0b;
-            --primary-hover: #d97706; --text-main: #f8fafc; --text-muted: #94a3b8;
-            --error: #ef4444; --success: #22c55e; --terminal-bg: #020617;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
-        body { background-color: var(--bg-color); color: var(--text-main); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { background-color: var(--card-bg); padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); width: 100%; max-width: 450px; text-align: center; }
-        h1 { color: var(--primary); margin-bottom: 10px; font-size: 28px; }
-        p.subtitle { color: var(--text-muted); margin-bottom: 30px; font-size: 14px; }
-        .input-group { margin-bottom: 20px; text-align: left; }
-        label { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 14px; }
-        input { width: 100%; padding: 12px 15px; border: 1px solid #334155; background-color: var(--bg-color); color: var(--text-main); border-radius: 8px; font-size: 16px; outline: none; }
-        button { width: 100%; padding: 14px; background-color: var(--primary); color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
-        button:disabled { background-color: #475569; cursor: not-allowed; }
-        .code-display { display: none; margin-top: 30px; padding: 20px; background-color: var(--bg-color); border: 2px dashed var(--primary); border-radius: 8px; }
-        .code-display h2 { font-size: 32px; letter-spacing: 5px; color: var(--text-main); margin: 10px 0; }
-        .terminal { margin-top: 30px; background-color: var(--terminal-bg); border-radius: 8px; padding: 15px; height: 150px; overflow-y: auto; text-align: left; font-family: monospace; font-size: 12px; border: 1px solid #334155; }
-        .log-entry { margin-bottom: 5px; } .log-success { color: var(--success); } .log-error { color: var(--error); }
-        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: var(--error); margin-right: 5px; }
-        .status-dot.connected { background-color: var(--success); }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tora MD iOS Glass UI</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --green:#00ff88;
+  --cyan:#00f2ff;
+  --red:#ff0033;
+}
+body{
+  margin:0;
+  background:#000;
+  font-family:'Orbitron', sans-serif;
+  overflow:hidden;
+  transition:background 0.5s;
+}
+canvas{position:fixed;top:0;left:0;z-index:0;}
+.screen{position:absolute;width:100%;height:100%;display:flex;justify-content:center;align-items:center;z-index:10;transition:0.5s;}
+.hidden{opacity:0;pointer-events:none;}
+.box{background:rgba(255,255,255,0.05);backdrop-filter:blur(15px);border-radius:25px;border:1px solid rgba(255,255,255,0.15);padding:30px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);transition:0.3s;width: 320px;}
+.title{font-size:2.5rem;background:linear-gradient(to right,var(--red),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:20px;}
+.jp{position:absolute;left:10px;top:50%;transform:rotate(-90deg) translateY(-50%);color:var(--cyan);opacity:0.6;font-family:'Noto Sans JP',sans-serif;}
+.btn{margin:15px;padding:15px 25px;border-radius:20px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:var(--green);font-size:1.2rem;cursor:pointer;backdrop-filter:blur(15px);transition:0.3s;}
+.btn:hover{background:rgba(255,255,255,0.2);color:#fff;box-shadow:0 0 15px var(--green);}
+.btn:disabled{opacity:0.5;cursor:not-allowed;}
+input{width:85%;padding:12px;border:none;border-radius:15px;background:rgba(255,255,255,0.05);color:var(--cyan);text-align:center;font-size:1.2rem;backdrop-filter:blur(15px);margin:15px 0;outline:none;border:1px solid rgba(255,255,255,0.1);}
+.code{font-size:1.5rem;color:var(--green);text-shadow:0 0 10px var(--green);margin-top:10px;font-family:'JetBrains Mono', monospace;letter-spacing:2px;min-height:30px;}
+.copy{cursor:pointer;font-size:1.2rem;margin-left:10px;vertical-align:middle;transition:0.2s;}
+.copy:active{transform:scale(0.8);}
+#qr-container{margin:20px auto 10px auto;padding:15px;background:rgba(0,0,0,0.5);border-radius:20px;border:1px solid rgba(255,255,255,0.1);width:180px;height:180px;display:none;justify-content:center;align-items:center;}
+#qr-container img{border-radius:12px;border:2px solid var(--cyan);box-shadow:0 0 15px var(--cyan);}
+.stats{display:flex;justify-content:space-between;font-size:0.8rem;color:var(--green);margin-top:20px;}
+.hack body,.hack.box{background:#300000!important;color:#ff5555!important;box-shadow:0 0 30px #ff0000!important;}
+.hack.btn{color:#ff5555!important;border-color:#ff5555!important;}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:10px 20px;border-radius:10px;font-size:0.9rem;opacity:0;transition:0.3s;z-index:999;}
+.toast.show{opacity:1;}
+</style>
 </head>
 <body>
-    <div class="container">
-        <h1>🐅 Tora MD Engine</h1>
-        <p class="subtitle"><span class="status-dot" id="ws-status"></span>Server Status: <span id="ws-text">Disconnected</span></p>
-        <div class="input-group">
-            <label>WhatsApp Number (with country code):</label>
-            <input type="text" id="phoneNumber" placeholder="e.g. 94722633010" autocomplete="off">
-        </div>
-        <button id="pairBtn" onclick="requestPairing()">Generate Pairing Code</button>
-        <div class="code-display" id="codeBox">
-            <p style="color: var(--text-muted); font-size: 14px;">Enter this code on your phone:</p>
-            <h2 id="pairingCode">----</h2>
-        </div>
-        <div class="terminal" id="terminal"><div class="log-entry">System ready...</div></div>
+
+<canvas id="matrix"></canvas>
+<div class="jp">接続 システム</div>
+<div class="toast" id="toast">Copied!</div>
+
+<div class="screen" id="main">
+  <div class="box">
+    <div class="title">Tora MD</div>
+    <div class="btn" onclick="openPair()">🔗 ペアリング</div>
+    <div class="btn" onclick="contact()">👤 オーナーに連絡</div>
+    <div class="btn" onclick="hackMode()">💀 ハッカーモード</div>
+    <div class="stats">
+      <span id="battery">BAT: --</span>
+      <span id="net">NET: CONNECTING</span>
     </div>
-    <script>
-        let ws;
-        const sessionIdentifier = "${sessionIdentifier}";
-        const terminal = document.getElementById('terminal');
-        const codeBox = document.getElementById('codeBox');
-        const pairingCodeText = document.getElementById('pairingCode');
-        const pairBtn = document.getElementById('pairBtn');
-        const phoneInput = document.getElementById('phoneNumber');
-        const wsStatus = document.getElementById('ws-status');
-        const wsText = document.getElementById('ws-text');
+  </div>
+</div>
 
-        function appendLog(msg, type='info') {
-            const el = document.createElement('div'); el.className = 'log-entry log-'+type;
-            el.innerText = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-            terminal.appendChild(el); terminal.scrollTop = terminal.scrollHeight;
-        }
+<div class="screen hidden" id="pair">
+  <div class="box">
+    <div class="title">ペアリング</div>
+    <input id="num" placeholder="947xxxxxxx">
+    <div>
+      <span class="code" id="code">------</span>
+      <span class="copy" onclick="copyCode()">📋</span>
+    </div>
+    <div id="qr-container"></div>
+    <div class="btn" id="genBtn" onclick="generate()">生成</div>
+    <div class="btn" onclick="back()">← 戻る</div>
+    <div class="stats">
+      <span id="cpu">CPU: --</span>
+      <span id="ping">STATE: IDLE</span>
+    </div>
+  </div>
+</div>
 
-        function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(protocol + '//' + window.location.host);
-            ws.onopen = () => {
-                wsStatus.className = 'status-dot connected'; wsText.innerText = 'Connected'; wsText.style.color = 'var(--success)';
-                ws.send(JSON.stringify({ action: 'init', sessionId: sessionIdentifier }));
-            };
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'status') {
-                        appendLog('Status: ' + data.status);
-                        if (data.status === 'CONNECTED') pairBtn.innerText = "Linked Successfully";
-                    } else if (data.type === 'error') {
-                        appendLog(data.message, 'error'); pairBtn.disabled = false; pairBtn.innerText = "Try Again";
-                    } else if (data.type === 'code') {
-                        codeBox.style.display = 'block'; pairingCodeText.innerText = data.code;
-                        appendLog('Pairing code generated!', 'success'); pairBtn.innerText = "Code Active";
-                    }
-                } catch(e){}
-            };
-            ws.onclose = () => {
-                wsStatus.className = 'status-dot'; wsText.innerText = 'Disconnected'; wsText.style.color = 'var(--error)';
-                setTimeout(connectWebSocket, 3000);
-            };
-        }
+<script>
+const c=document.getElementById("matrix");
+const ctx=c.getContext("2d");
+c.width=innerWidth;
+c.height=innerHeight;
+const letters="ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿ1234567890接続TORA";
+const drops=Array(Math.floor(c.width/15)).fill(1);
+setInterval(()=>{
+  ctx.fillStyle="rgba(0,0,0,0.05)";
+  ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle="#0f8";
+  ctx.font = "15px monospace";
+  drops.forEach((y,i)=>{
+    const t=letters[Math.floor(Math.random()*letters.length)];
+    ctx.fillText(t,i*15,y*15);
+    drops[i]=y*15>c.height?0:y+1;
+  });
+},33);
+window.addEventListener('resize', () => {c.width=innerWidth;c.height=innerHeight;});
 
-        function requestPairing() {
-            const num = phoneInput.value.replace(/[^0-9]/g, '');
-            if(!num) return appendLog('Invalid Number', 'error');
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ action: 'start_pairing', sessionId: sessionIdentifier, phoneNumber: num, mode: 'pairing' }));
-                pairBtn.disabled = true; pairBtn.innerText = "Requesting...";
-            }
-        }
-        window.onload = connectWebSocket;
-    </script>
+// FIX: Get all elements properly
+const main = document.getElementById("main");
+const pair = document.getElementById("pair");
+const code = document.getElementById("code");
+const battery = document.getElementById("battery");
+const cpu = document.getElementById("cpu");
+const genBtn = document.getElementById("genBtn");
+const toast = document.getElementById("toast");
+
+function openPair(){main.classList.add("hidden");pair.classList.remove("hidden");beep();}
+function back(){pair.classList.add("hidden");main.classList.remove("hidden");beep();}
+function contact(){window.open("https://wa.me/+94781864250?text=Hello_ToraMD_Owner");}
+
+function beep(){
+  try {
+    let ctxAudio=new (window.AudioContext || window.webkitAudioContext)();
+    let osc=ctxAudio.createOscillator();
+    osc.type='sine';
+    osc.frequency.setValueAtTime(800, ctxAudio.currentTime);
+    osc.connect(ctxAudio.destination);
+    osc.start();
+    osc.stop(ctxAudio.currentTime+0.05);
+  } catch(e) {}
+}
+
+function showToast(msg){
+  toast.innerText = msg;
+  toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'), 2000);
+}
+
+function typeCode(text){
+  let i=0;code.innerText="";
+  const interval=setInterval(()=>{
+    code.innerText+=text[i];
+    beep();
+    i++;
+    if(i>=text.length) clearInterval(interval);
+  },80);
+}
+
+let ws;
+const sessionId = "tora_" + Math.random().toString(36).substring(2, 9);
+
+function connectWS(){
+  const protocol = window.location.protocol === "https:"? "wss:" : "ws:";
+  ws = new WebSocket(`${protocol}//${window.location.host}`);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ action: "init", sessionId: sessionId }));
+    document.getElementById("net").innerText = "NET: ONLINE";
+  };
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    if (data.type === "code") {
+      document.getElementById("qr-container").style.display = "none";
+      code.style.display = "inline-block";
+      typeCode(data.code);
+      document.getElementById("ping").innerText = "STATE: CODE READY";
+      genBtn.disabled = false;
+      genBtn.innerText = "Regenerate";
+    }
+
+    if (data.type === "qr") {
+      code.style.display = "none";
+      code.innerText = "QR READY";
+      document.getElementById("ping").innerText = "STATE: SCAN QR";
+      const qrBox = document.getElementById("qr-container");
+      qrBox.style.display = "flex";
+      qrBox.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(data.qr)}&color=00f2ff&bgcolor=000" alt="QR Code" />`;
+      beep();
+      genBtn.disabled = false;
+      genBtn.innerText = "Regenerate";
+    }
+
+    if (data.type === "status") {
+      document.getElementById("ping").innerText = `STATE: ${data.status}`;
+    }
+
+    if (data.type === "error") {
+      if (data.message.toLowerCase().includes("timeout")) {
+        document.getElementById("ping").innerText = "STATE: TIMEOUT FALLBACK";
+      } else {
+        code.innerText = "ERR-RETRY";
+        document.getElementById("ping").innerText = `ERR: ${data.message}`;
+      }
+      genBtn.disabled = false;
+      genBtn.innerText = "Try Again";
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById("net").innerText = "NET: OFFLINE";
+    document.getElementById("ping").innerText = "STATE: CLOSED";
+    setTimeout(connectWS, 3000); // FIX: Auto reconnect
+  };
+}
+
+function generate(){
+  const phoneNumberInput = document.getElementById("num").value.trim().replace(/[^0-9]/g, '');
+  if (phoneNumberInput.length < 8) {
+    code.innerText = "BAD-NUMBER";
+    beep();
+    return;
+  }
+
+  code.innerText = "FETCHING...";
+  code.style.display = "inline-block";
+  document.getElementById("qr-container").style.display = "none";
+  genBtn.disabled = true;
+  genBtn.innerText = "Requesting...";
+  beep();
+
+  if(ws && ws.readyState === WebSocket.OPEN){
+    ws.send(JSON.stringify({
+      action: "start_pairing",
+      sessionId: sessionId,
+      phoneNumber: phoneNumberInput,
+      mode: "pairing"
+    }));
+  } else {
+    code.innerText = "NO-CONNECT";
+    genBtn.disabled = false;
+    genBtn.innerText = "Retry";
+  }
+}
+
+function copyCode(){
+  if(code.innerText === "------" || code.innerText === "FETCHING..." || code.innerText === "QR READY" || code.innerText.includes("ERR")) return;
+  navigator.clipboard.writeText(code.innerText);
+  showToast("Code copied: " + code.innerText); // FIX: No alert
+}
+
+function hackMode(){document.body.classList.toggle("hack");}
+
+async function updateStats(){
+  if(navigator.getBattery){
+    const b=await navigator.getBattery();
+    battery.innerText="BAT:"+Math.round(b.level*100)+"%";
+  }
+  cpu.innerText="CPU:"+Math.floor(Math.random()*25+15)+"%";
+}
+setInterval(updateStats,3000);
+updateStats();
+
+// FIX: Initialize WS on load
+window.onload = connectWS;
+</script>
 </body>
 </html>
-  `);
-});
-
-// WEBSOCKET BACKEND HANDLING
-wss.on("connection", (ws) => {
-  let boundSessionId = null;
-  ws.on("message", async (message) => {
-    try {
-      const data = JSON.parse(message);
-      if (data.action === "init") {
-        boundSessionId = data.sessionId;
-        if (!wsClients.has(boundSessionId)) wsClients.set(boundSessionId, new Set());
-        wsClients.get(boundSessionId).add(ws);
-        if (activeSessions.has(boundSessionId)) ws.send(JSON.stringify({ type: "status", status: "CONNECTED" }));
-      }
-      if (data.action === "start_pairing") {
-        const { sessionId, phoneNumber, mode } = data;
-        boundSessionId = sessionId;
-        if (!wsClients.has(boundSessionId)) wsClients.set(boundSessionId, new Set());
-        wsClients.get(boundSessionId).add(ws);
-        initializeWhatsAppInstance(sessionId, phoneNumber, mode);
-      }
-    } catch (err) { ws.send(JSON.stringify({ type: "error", message: err.message })); }
-  });
-  ws.on("close", () => { if (boundSessionId && wsClients.has(boundSessionId)) wsClients.get(boundSessionId).delete(ws); });
-});
-
-function sendToSession(sessionId, payload) {
-  const clients = wsClients.get(sessionId);
-  if (clients) {
-    const dataString = JSON.stringify(payload);
-    clients.forEach((client) => { if (client.readyState === WebSocket.OPEN) client.send(dataString); });
-  }
-}
-
-async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
-  const sessionPath = `./auth_info/${sessionId}`;
-  if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
-
-  if (activeSessions.has(sessionId)) {
-    try { activeSessions.get(sessionId).end(); } catch(_) {}
-    activeSessions.delete(sessionId);
-  }
-
-  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-  const sock = makeWASocket({
-    logger: pino({ level: "silent" }),
-    auth: state,
-    printQRInTerminal: false,
-    browser: Browsers.ubuntu('Chrome')
-  });
-
-  activeSessions.set(sessionId, sock);
-  sock.ev.on("creds.update", saveCreds);
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    if (qr) sendToSession(sessionId, { type: "qr", qr });
-    if (connection === "connecting") sendToSession(sessionId, { type: "status", status: "CONNECTING" });
-    if (connection === "open") sendToSession(sessionId, { type: "status", status: "CONNECTED" });
-    if (connection === "close") {
-      const reason = lastDisconnect?.error?.output?.statusCode;
-      sendToSession(sessionId, { type: "status", status: "DISCONNECTED" });
-      if (reason !== DisconnectReason.loggedOut) {
-        setTimeout(() => initializeWhatsAppInstance(sessionId, phoneNumber, mode), 5000);
-      } else {
-        fs.rmSync(sessionPath, { recursive: true, force: true });
-        activeSessions.delete(sessionId);
-      }
-    }
-  });
-
-  if (mode === "pairing" && !state.creds.registered) {
-    setTimeout(async () => {
-      try {
-        const code = await sock.requestPairingCode(phoneNumber);
-        const formattedCode = code?.match(/.{1,4}/g)?.join("-") || code;
-        sendToSession(sessionId, { type: "code", code: formattedCode });
-      } catch (err) {
-        sendToSession(sessionId, { type: "error", message: "Pairing code timeout." });
-      }
-    }, 3000); 
-  }
-}
-
-server.listen(PORT, () => console.log(`🚀 Single-File Engine running on port ${PORT}`));
