@@ -2,8 +2,7 @@ require('dotenv').config();
 const { 
   default: makeWASocket, 
   useMultiFileAuthState, 
-  DisconnectReason,
-  Browsers
+  DisconnectReason
 } = require("@whiskeysockets/baileys");
 const express = require("express");
 const { createServer } = require("http");
@@ -91,7 +90,7 @@ app.get("/", (req, res) => {
             </div>
         </div>
 
-        <div class="terminal" id="terminal"><div class="log-entry">System clean. Ready to verify...</div></div>
+        <div class="terminal" id="terminal"><div class="log-entry">System ready to verify...</div></div>
     </div>
 
     <script>
@@ -143,7 +142,7 @@ app.get("/", (req, res) => {
                         qrBtn.disabled = false; qrBtn.innerText = "Get QR Code";
                     } else if (data.type === 'code') {
                         codeBox.style.display = 'block'; pairingCodeText.innerText = data.code;
-                        appendLog('Pairing Code Generated!', 'success'); pairBtn.disabled = false; pairBtn.innerText = "Regenerate Code";
+                        appendLog('Pairing Code Ready!', 'success'); pairBtn.disabled = false; pairBtn.innerText = "Regenerate Code";
                     } else if (data.type === 'qr') {
                         qrBox.style.display = 'block';
                         qrImage.src = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent(data.qr);
@@ -212,7 +211,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   const sessionPath = `./auth_info/${sessionId}`;
   if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
 
-  // Clear pending loop retry timeouts to prevent memory leaks
   if (connectionDelayTimers.has(sessionId)) {
     clearTimeout(connectionDelayTimers.get(sessionId));
     connectionDelayTimers.delete(sessionId);
@@ -229,11 +227,13 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   }
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+  
+  // Using an explicit raw array signature completely stabilizes pairing streams against instant closed drops
   const sock = makeWASocket({
     logger: pino({ level: "silent" }),
     auth: state,
     printQRInTerminal: false,
-    browser: Browsers.ubuntu('Chrome')
+    browser: ["Ubuntu", "Chrome", "20.0.04"]
   });
 
   activeSessions.set(sessionId, sock);
@@ -253,12 +253,11 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
         sendToSession(sessionId, { type: "status", status: "DISCONNECTED" });
         
         if (reason !== DisconnectReason.loggedOut) {
-          // Throttled linear delay instead of instantaneous firing prevents loop of death
           const retryTimer = setTimeout(() => {
             if (activeSessions.get(sessionId) === sock) {
               initializeWhatsAppInstance(sessionId, phoneNumber, mode);
             }
-          }, 8000);
+          }, 12000); // Higher padding window lets the user process pairing frames without loop collisions
           connectionDelayTimers.set(sessionId, retryTimer);
         } else {
           fs.rmSync(sessionPath, { recursive: true, force: true });
@@ -278,11 +277,11 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
         }
       } catch (err) {
         if (activeSessions.get(sessionId) === sock) {
-          sendToSession(sessionId, { type: "error", message: "Pairing code request timed out." });
+          sendToSession(sessionId, { type: "error", message: "Pairing session failed or timed out." });
         }
       }
     }, 4000); 
   }
 }
 
-server.listen(PORT, () => console.log(`🚀 Master Dashboard Gateway online on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Master Gateway online on port ${PORT}`));
