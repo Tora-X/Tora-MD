@@ -20,16 +20,14 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3000;
 const prefix = process.env.PREFIX || ".";
 
-// Global registries
 const commands = new Map();
 const activeSessions = new Map(); 
-const wsClients = new Map(); // sessionId -> Set of WebSocket clients
+const wsClients = new Map(); 
 
 function registerCommand(name, description, category, handler) {
   commands.set(name.toLowerCase(), { name, description, category, handler });
 }
 
-// Load Modules
 require("./general")(registerCommand);
 require("./admin")(registerCommand);
 require("./info")(registerCommand);
@@ -37,7 +35,6 @@ require("./fun")(registerCommand);
 
 app.use(express.json());
 
-// SAFELY serve UI.html from the root folder without exposing sensitive files
 app.get("/", (req, res) => {
   const uiPath = path.resolve("./UI.html");
   if (fs.existsSync(uiPath)) {
@@ -47,9 +44,6 @@ app.get("/", (req, res) => {
   }
 });
 
-/* ══════════════════════════════════════════════════
-   WEBSOCKET REAL-TIME STREAM GATEWAY
-══════════════════════════════════════════════════ */
 wss.on("connection", (ws) => {
   let boundSessionId = null;
 
@@ -100,12 +94,14 @@ function sendToSession(sessionId, payload) {
   }
 }
 
-/* ══════════════════════════════════════════════════
-   WHATSAPP DYNAMIC SESSION ENGINE
-══════════════════════════════════════════════════ */
 async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   const sessionPath = `./auth_info/${sessionId}`;
   
+  // 🛠️ THE FIX: Force create the directory structure so Baileys doesn't crash on ENOENT
+  if (!fs.existsSync(sessionPath)) {
+    fs.mkdirSync(sessionPath, { recursive: true });
+  }
+
   if (activeSessions.has(sessionId)) {
     try { activeSessions.get(sessionId).end(); } catch(_) {}
     activeSessions.delete(sessionId);
