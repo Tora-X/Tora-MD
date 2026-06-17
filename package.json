@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node --max-old-space-size=350 --gc-interval=100 index.js"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^6.7.9",
