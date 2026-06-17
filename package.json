@@ -1,22 +1,18 @@
 {
-  "name": "tora-md-multisession-web",
-  "version": "1.2.0",
-  "description": "Modular Multi-Session WhatsApp Bot with Web Dashboard",
+  "name": "tora-md",
+  "version": "1.0.0",
+  "description": "Optimized Multi-Device WhatsApp Engine",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node --max-old-space-size=350 --gc-interval=100 index.js"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^6.7.9",
-    "axios": "^1.6.8",
+    "axios": "^1.7.2",
     "dotenv": "^16.4.5",
-    "express": "^4.18.2",
-    "pino": "^8.15.0",
-    "qrcode-terminal": "^0.12.0",
-    "ws": "^8.18.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "express": "^4.19.2",
+    "pino": "^9.2.0",
+    "ws": "^8.17.1"
   }
 }
