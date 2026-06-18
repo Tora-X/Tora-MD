@@ -1,4 +1,3 @@
-require('dotenv').config();
 const { 
   default: makeWASocket, 
   useMultiFileAuthState, 
@@ -11,14 +10,16 @@ const { createServer } = require("http");
 const { WebSocketServer, WebSocket } = require("ws");
 const pino = require("pino");
 const fs = require("fs");
+const path = require("path");
 const axios = require("axios");
+
+// Project File Imports
+const config = require('./config');
+const { connectDB, syncSessionToDisk, syncSessionToCloud } = require('./database');
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
-
-const PORT = process.env.PORT || 8080;
-const sessionIdentifier = "tora_session";
 
 const activeSessions = new Map(); 
 const wsClients = new Map(); 
@@ -26,8 +27,11 @@ const connectionDelayTimers = new Map();
 
 app.use(express.json());
 
+// Connect Database Layer
+connectDB();
+
 // ═════════════════════════════════════════════════════════
-// 1. WEB DASHBOARD UI (DARK NEON AESTHETIC)
+// 1. DASHBOARD CONTROLLER GRAPHICS LAYER
 // ═════════════════════════════════════════════════════════
 app.get("/", (req, res) => {
   res.send(`
@@ -64,9 +68,6 @@ app.get("/", (req, res) => {
         .code-display { display: none; margin-top: 25px; padding: 20px; background-color: var(--terminal-bg); border: 2px dashed var(--primary); border-radius: 18px; }
         .code-display h2 { font-size: 32px; letter-spacing: 6px; color: var(--text-main); margin: 8px 0; text-shadow: 0 0 8px rgba(255,255,255,0.2); }
         .terminal { margin-top: 25px; background-color: var(--terminal-bg); border-radius: 18px; padding: 15px; height: 140px; overflow-y: auto; text-align: left; font-family: monospace; font-size: 11px; border: 1px solid #1e293b; color: #a7f3d0; }
-        .log-entry { margin-bottom: 4px; } .log-success { color: var(--success); } .log-error { color: var(--error); }
-        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: var(--error); }
-        .status-dot.connected { background-color: var(--success); box-shadow: 0 0 8px var(--success); }
     </style>
 </head>
 <body>
@@ -96,19 +97,18 @@ app.get("/", (req, res) => {
             </div>
         </div>
 
-        <div class="terminal" id="terminal"><div class="log-entry">System ready to verify...</div></div>
+        <div class="terminal" id="terminal"><div>System cloud storage synchronized...</div></div>
     </div>
 
     <script>
-        let ws; let currentMode = 'qr'; const sessionIdentifier = "${sessionIdentifier}";
+        let ws; let currentMode = 'qr'; const sessionIdentifier = "${config.SESSION_ID}";
         const terminal = document.getElementById('terminal'); const codeBox = document.getElementById('codeBox');
         const qrBox = document.getElementById('qrBox'); const qrImage = document.getElementById('qrImage');
         const pairingCodeText = document.getElementById('pairingCode'); const pairBtn = document.getElementById('pairBtn');
         const qrBtn = document.getElementById('qrBtn'); const phoneInput = document.getElementById('phoneNumber');
-        const wsStatus = document.getElementById('ws-status'); const wsText = document.getElementById('ws-text');
 
-        function appendLog(msg, type='info') {
-            const el = document.createElement('div'); el.className = 'log-entry log-'+type;
+        function appendLog(msg) {
+            const el = document.createElement('div');
             el.innerText = '[' + new Date().toLocaleTimeString() + '] ' + msg;
             terminal.appendChild(el); terminal.scrollTop = terminal.scrollHeight;
         }
@@ -125,7 +125,6 @@ app.get("/", (req, res) => {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(protocol + '//' + window.location.host);
             ws.onopen = () => {
-                wsStatus.className = 'status-dot connected'; wsText.innerText = 'System Online'; wsText.style.color = 'var(--success)';
                 ws.send(JSON.stringify({ action: 'init', sessionId: sessionIdentifier }));
             };
             ws.onmessage = (event) => {
@@ -134,45 +133,30 @@ app.get("/", (req, res) => {
                     if (data.type === 'status') {
                         appendLog('State: ' + data.status);
                         if (data.status === 'CONNECTED') {
-                            pairBtn.innerText = "Linked!"; qrBtn.innerText = "Linked!";
-                            pairBtn.disabled = false; qrBtn.disabled = false;
                             qrBox.style.display = 'none'; codeBox.style.display = 'none';
                         }
-                        if (data.status === 'DISCONNECTED') {
-                            pairBtn.disabled = false; pairBtn.innerText = "Generate Pairing Code";
-                            qrBtn.disabled = false; qrBtn.innerText = "Get QR Code";
-                        }
-                    } else if (data.type === 'error') {
-                        appendLog(data.message, 'error'); 
-                        pairBtn.disabled = false; pairBtn.innerText = "Try Again";
-                        qrBtn.disabled = false; qrBtn.innerText = "Get QR Code";
                     } else if (data.type === 'code') {
                         codeBox.style.display = 'block'; pairingCodeText.innerText = data.code;
-                        appendLog('Pairing Code Ready!', 'success'); pairBtn.disabled = false; pairBtn.innerText = "Regenerate Code";
+                        pairBtn.disabled = false; pairBtn.innerText = "Regenerate Code";
                     } else if (data.type === 'qr') {
                         qrBox.style.display = 'block';
                         qrImage.src = "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=" + encodeURIComponent(data.qr);
-                        appendLog('New QR signature received.', 'success'); qrBtn.disabled = false; qrBtn.innerText = "Refresh QR";
+                        qrBtn.disabled = false; qrBtn.innerText = "Refresh QR";
                     }
                 } catch(e){}
             };
-            ws.onclose = () => {
-                wsStatus.className = 'status-dot'; wsText.innerText = 'Disconnected'; wsText.style.color = 'var(--error)';
-                setTimeout(connectWebSocket, 3000);
-            };
+            ws.onclose = () => { setTimeout(connectWebSocket, 3000); };
         }
 
         function requestSession(mode) {
             let num = '';
             if (mode === 'pairing') {
                 num = phoneInput.value.replace(/[^0-9]/g, '');
-                if(!num) return appendLog('Please enter a valid phone number.', 'error');
+                if(!num) return;
             }
             if (ws && ws.readyState === WebSocket.OPEN) {
                 qrBox.style.display = 'none'; codeBox.style.display = 'none';
                 ws.send(JSON.stringify({ action: 'start_pairing', sessionId: sessionIdentifier, phoneNumber: num, mode: mode }));
-                if(mode === 'pairing') { pairBtn.disabled = true; pairBtn.innerText = "Requesting System..."; }
-                if(mode === 'qr') { qrBtn.disabled = true; qrBtn.innerText = "Requesting QR..."; }
             }
         }
         window.onload = connectWebSocket;
@@ -183,7 +167,7 @@ app.get("/", (req, res) => {
 });
 
 // ═════════════════════════════════════════════════════════
-// 2. WEBSOCKET ROUTING
+// 2. WEBSOCKET ROUTING LAYER
 // ═════════════════════════════════════════════════════════
 wss.on("connection", (ws) => {
   let boundSessionId = null;
@@ -217,11 +201,13 @@ function sendToSession(sessionId, payload) {
 }
 
 // ═════════════════════════════════════════════════════════
-// 3. CORE GATEWAY ENGINE & STABLE ENGINE RE-HANDSHAKING
+// 3. WHATSAPP CORE ROUTINES (WITH AUTOMATIC HYBRID CLOUD SYNC)
 // ═════════════════════════════════════════════════════════
 async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
-  const sessionPath = `./auth_info/${sessionId}`;
-  if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
+  const localSessionPath = path.join(__dirname, 'auth_info', sessionId);
+  
+  // 1. Recover backup copies down from MongoDB prior to starting up local states
+  await syncSessionToDisk(sessionId, localSessionPath);
 
   if (connectionDelayTimers.has(sessionId)) {
     clearTimeout(connectionDelayTimers.get(sessionId));
@@ -238,17 +224,7 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
     activeSessions.delete(sessionId);
   }
 
-  try {
-    if (fs.existsSync(`${sessionPath}/creds.json`)) {
-      const stat = fs.statSync(`${sessionPath}/creds.json`);
-      if (stat.size < 50) { 
-        fs.rmSync(sessionPath, { recursive: true, force: true });
-        fs.mkdirSync(sessionPath, { recursive: true });
-      }
-    }
-  } catch(e){}
-
-  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+  const { state, saveCreds } = await useMultiFileAuthState(localSessionPath);
   
   let waVersion = [2, 3000, 10154131]; 
   try {
@@ -265,7 +241,12 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   });
 
   activeSessions.set(sessionId, sock);
-  sock.ev.on("creds.update", saveCreds);
+  
+  // Intercept Credential Changes & Pipe them asynchronously to MongoDB Cluster
+  sock.ev.on("creds.update", async () => {
+      await saveCreds();
+      syncSessionToCloud(sessionId, localSessionPath);
+  });
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -286,7 +267,7 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
           }, 10000); 
           connectionDelayTimers.set(sessionId, retryTimer);
         } else {
-          fs.rmSync(sessionPath, { recursive: true, force: true });
+          fs.rmSync(localSessionPath, { recursive: true, force: true });
           activeSessions.delete(sessionId);
         }
       }
@@ -302,15 +283,13 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
           sendToSession(sessionId, { type: "code", code: formattedCode });
         }
       } catch (err) {
-        if (activeSessions.get(sessionId) === sock) {
-          sendToSession(sessionId, { type: "error", message: "Handshake rejected. Try again." });
-        }
+          sendToSession(sessionId, { type: "error", message: "Handshake rejected." });
       }
     }, 7000); 
   }
 
   // ═════════════════════════════════════════════════════════
-  // 4. POWERFUL COMMAND MANAGER & INTEGRATED SUITE
+  // 4. INTEGRATED MESSAGE ROUTER (CROSS-REFERENCED INTERFACE)
   // ═════════════════════════════════════════════════════════
   sock.ev.on("messages.upsert", async (chatUpdate) => {
     try {
@@ -336,11 +315,11 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
         const text = args.join(" ");
         const isGroup = from.endsWith('@g.us');
 
-        // Helpers
         const reply = async (targetJid, textContent, originalMsg) => {
             await sock.sendMessage(targetJid, { text: textContent }, { quoted: originalMsg });
         };
 
+        // Sequential Frame-by-Frame Emoji Editing Animation Loop
         const animateEmojis = async (targetJid, emojiArray, originalMsg) => {
             let { key } = await sock.sendMessage(targetJid, { text: emojiArray[0] }, { quoted: originalMsg });
             for (let i = 1; i < emojiArray.length; i++) {
@@ -349,15 +328,13 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
             }
         };
 
-        // Group Permissions Meta
         let groupMetadata = isGroup ? await sock.groupMetadata(from) : null;
         let groupParticipants = isGroup ? groupMetadata.participants : [];
         let groupAdmins = isGroup ? groupParticipants.filter(p => p.admin !== null).map(p => p.id) : [];
         let isBotAdmin = isGroup ? groupAdmins.includes(sock.user.id.split(':')[0]+'@s.whatsapp.net') : false;
         let isSenderAdmin = isGroup ? groupAdmins.includes(sender) : false;
-        let isOwner = sender.includes("94722633010"); // Configured absolute owner privilege Check
+        let isOwner = sender.includes(config.OWNER_NUMBER);
 
-        // Command Registry Matrix
         switch (command) {
             case 'menu':
                 const dynamicTime = new Date().toLocaleTimeString();
@@ -428,7 +405,7 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                                   `┊ 📘 Usage Guide\n` +
                                   `┊ 👤 User  : ☬ 𝐑𝐚𝐬𝐡𝐦𝐢𝐤𝐚\n` +
                                   `┊ ⏰ Time  : ${new Date().toLocaleTimeString()}\n` +
-                                  `╰─❍──────────────────❍─/╯\n\n` +
+                                  `╰─❍──────────────────❍─╯\n\n` +
                                   `╭─〔 🎵 SONGS & VIDEOS 〕\n` +
                                   `┊ .song      faded alan walker\n` +
                                   `┊ .song      https://youtu.be/xxxx\n` +
@@ -471,20 +448,20 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
 
             case 'ping':
                 const startM = Date.now();
-                await reply(from, "Testing execution latency...", mec);
-                await reply(from, `🚀 *Pong!* Latency: _${Date.now() - startM}ms_`, mec);
+                await reply(from, "🚀 *Tora Engine Checking Matrix Roundtrip Latency...*", mec);
+                await reply(from, `🚀 *Pong!* Response Vector: _${Date.now() - startM}ms_`, mec);
                 break;
 
             case 'alive':
-                await reply(from, "🐅 *TORA MD ENGINE IS ALIVE AND OPERATIONAL* 🐅\n\nStable connection maintained.", mec);
+                await reply(from, "🐅 *TORA MD ENGINE IS ONLINE & SECURED VIA MONGODB* 🐅", mec);
                 break;
 
             case 'runtime':
                 const upt = process.uptime();
-                await reply(from, `⏳ *Uptime:* _${Math.floor(upt/3600)}h ${Math.floor((upt%3600)/60)}m ${Math.floor(upt%60)}s_`, mec);
+                await reply(from, `⏳ *Uptime Matrix:* _${Math.floor(upt/3600)}h ${Math.floor((upt%3600)/60)}m ${Math.floor(upt%60)}s_`, mec);
                 break;
 
-            // ════════════════ SYSTEM EMOTION SECTIONS ════════════════
+            // ════════════════ SYSTEM ANIMATED EMOTIONS ════════════════
             case 'happy':
                 await animateEmojis(from, ["😀","😁","😂","🤣","😃","😄","😅","😆","😉","😊","😋","😎","😍"], mec);
                 break;
@@ -494,134 +471,132 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 break;
 
             case 'angry':
-                await animateEmojis(from, ["😠","😡","🤬","👿","😤","💢"], mec);
+                await animateEmojis(from, ["😠","😡","🤬","👿","😤","💥","💢"], mec);
                 break;
 
             case 'love':
-                await animateEmojis(from, ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","💖","💝","😍","😘"], mec);
+                await animateEmojis(from, ["❤️","🧡","💛","💚","💙","💜","🖤","💖","💝","😍","😘"], mec);
                 break;
 
             // ════════════════ SOCIAL MEDIA DOWNLOADERS ════════════════
             case 'song':
-                if (!text) return reply(from, "Please specify a path name or URL.", mec);
-                await reply(from, "⏳ Sourcing & streaming track data...", mec);
+                if (!text) return reply(from, "Please provide a song query or URL.", mec);
+                await reply(from, "⏳ Fetching audio stream mapping...", mec);
                 try {
                     let streamUrl = text;
                     if (!text.includes("youtube.com") && !text.includes("youtu.be")) {
-                        const ytSearch = await axios.get(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(text)}&type=video&key=AIzaSyCEq9oJnzf5eFhkqdLlM_ggjCifaC4kk5o`);
-                        if (!ytSearch.data.items.length) return reply(from, "❌ Tracking failure.", mec);
+                        const ytSearch = await axios.get(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(text)}&type=video&key=${config.GEMINI_API_KEY}`);
+                        if (!ytSearch.data.items.length) return reply(from, "❌ Sourcing track error.", mec);
                         streamUrl = `https://www.youtube.com/watch?v=${ytSearch.data.items[0].id.videoId}`;
                     }
-                    const mp3Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp3/download?url=${streamUrl}&apiKey=key_6eff37305f63aa5c`);
+                    const mp3Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp3/download?url=${streamUrl}&apiKey=${config.THINUZZ_API_KEY}`);
                     if (mp3Res.data?.data?.download) {
                         await sock.sendMessage(from, { audio: { url: mp3Res.data.data.download }, mimetype: 'audio/mp4' }, { quoted: mec });
-                    } else { reply(from, "❌ Extraction pipeline denied.", mec); }
-                } catch (e) { reply(from, "⚠️ Server processing error.", mec); }
+                    } else { reply(from, "❌ Could not extract target stream.", mec); }
+                } catch (e) { reply(from, "⚠️ Server parsing error.", mec); }
                 break;
 
             case 'ytmp4':
-                if (!text) return reply(from, "Provide an extraction endpoint reference.", mec);
-                await reply(from, "⏳ Syncing 720p visual array...", mec);
+                if (!text) return reply(from, "Provide high-definition visual trace endpoint.", mec);
+                await reply(from, "⏳ Compiling 720p stream data arrays...", mec);
                 try {
-                    const mp4Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp4v2/download?url=${text}&quality=720&apiKey=key_6eff37305f63aa5c`);
+                    const mp4Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp4v2/download?url=${text}&quality=720&apiKey=${config.THINUZZ_API_KEY}`);
                     await sock.sendMessage(from, { video: { url: mp4Res.data?.data?.download }, caption: "🎥 Tora Engine High Resolution File" }, { quoted: mec });
-                } catch (e) { reply(from, "⚠️ Request dropped by host.", mec); }
+                } catch (e) { reply(from, "⚠️ Request dropped by streaming node.", mec); }
                 break;
 
             case 'fb':
-                if (!text) return reply(from, "Provide target link.", mec);
+                if (!text) return reply(from, "Provide target Facebook URL link.", mec);
                 try {
                     const fbRes = await axios.get(`https://www.movanest.xyz/v2/fbdown?url=${encodeURIComponent(text)}`);
                     await sock.sendMessage(from, { video: { url: fbRes.data.url }, caption: "📘 Facebook Data Extracted" }, { quoted: mec });
-                } catch (e) { reply(from, "⚠️ Verification failure.", mec); }
+                } catch (e) { reply(from, "⚠️ Hook error.", mec); }
                 break;
 
             case 'tiktok':
-                if (!text) return reply(from, "Link target missing.", mec);
+                if (!text) return reply(from, "Target URL link missing.", mec);
                 try {
-                    const ttRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/tiktok?url=${text}&apiKey=key_6eff37305f63aa5c`);
+                    const ttRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/tiktok?url=${text}&apiKey=${config.THINUZZ_API_KEY}`);
                     await sock.sendMessage(from, { video: { url: ttRes.data?.data?.noWatermark }, caption: "🎵 TikTok Stream Extracted" }, { quoted: mec });
-                } catch (e) { reply(from, "⚠️ Extraction broken.", mec); }
+                } catch (e) { reply(from, "⚠️ Node error.", mec); }
                 break;
 
             case 'instagram':
-                if (!text) return reply(from, "IG endpoint undefined.", mec);
+                if (!text) return reply(from, "Instagram target reference undefined.", mec);
                 try {
-                    const igRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/instadown/download?url=${text}&apiKey=key_6eff37305f63aa5c`);
+                    const igRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/instadown/download?url=${text}&apiKey=${config.THINUZZ_API_KEY}`);
                     await sock.sendMessage(from, { video: { url: igRes.data?.data?.url }, caption: "📸 Instagram Asset Acquired" }, { quoted: mec });
-                } catch (e) { reply(from, "⚠️ Download trace broken.", mec); }
+                } catch (e) { reply(from, "⚠️ Network extraction error.", mec); }
                 break;
 
             case 'mediafire':
             case 'gdrive':
-                if (!text) return reply(from, "Cloud storage reference missing.", mec);
+                if (!text) return reply(from, "Cloud storage pointer missing.", mec);
                 try {
                     const endpoint = command === 'mediafire' ? 'mediafire' : 'gdrive';
-                    const fileRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/${endpoint}?url=${text}&apiKey=key_6eff37305f63aa5c`);
+                    const fileRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/${endpoint}?url=${text}&apiKey=${config.THINUZZ_API_KEY}`);
                     const directUrl = fileRes.data?.data?.downloadUrl || fileRes.data?.data?.url;
-                    await reply(from, `📥 *Direct CDN Endpoint Extracted:*\n${directUrl}`, mec);
-                } catch (e) { reply(from, "⚠️ Link parsing failure.", mec); }
+                    await reply(from, `📥 *Direct CDN Access Extracted:*\n${directUrl}`, mec);
+                } catch (e) { reply(from, "⚠️ Resolution fault.", mec); }
                 break;
 
             case 'ssweb':
-                if (!text) return reply(from, "Provide target web system url.", mec);
-                await reply(from, "📸 Capturing full system frame...", mec);
+                if (!text) return reply(from, "Provide target URL.", mec);
+                await reply(from, "📸 Initializing page frame capture buffer...", mec);
                 try {
                     const ssUrl = `https://mini.s-shot.ru/1024x768/PNG/1024/?${text}`;
                     await sock.sendMessage(from, { image: { url: ssUrl }, caption: `🖥️ Frame capture for: ${text}` }, { quoted: mec });
-                } catch (e) { reply(from, "⚠️ Frame buffer extraction failed.", mec); }
+                } catch (e) { reply(from, "⚠️ Render interface timed out.", mec); }
                 break;
 
             // ════════════════ SEARCH CORE ════════════════
             case 'github':
-                if (!text) return reply(from, "Provide repository identifier.", mec);
+                if (!text) return reply(from, "Provide repository name.", mec);
                 try {
                     const gitRes = await axios.get(`https://api.github.com/search/repositories?q=${encodeURIComponent(text)}`);
                     if(gitRes.data?.items?.length) {
                         const repo = gitRes.data.items[0];
                         await reply(from, `📁 *Repository Identified:*\n\n*Name:* ${repo.full_name}\n*Stars:* ${repo.stargazers_count}\n*Forks:* ${repo.forks_count}\n*URL:* ${repo.html_url}`, mec);
-                    } else { reply(from, "❌ Zero results matching signature.", mec); }
-                } catch (e) { reply(from, "⚠️ API query dropped.", mec); }
+                    } else { reply(from, "❌ No matching repo signatures found.", mec); }
+                } catch (e) { reply(from, "⚠️ API interface down.", mec); }
                 break;
 
             case 'pinterest':
             case 'wallpaper':
-                if (!text) return reply(from, "Provide query asset name.", mec);
+                if (!text) return reply(from, "Provide image theme query text.", mec);
                 try {
-                    const imgQuery = encodeURIComponent(text);
                     const fallbackImg = `https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=600`;
-                    await sock.sendMessage(from, { image: { url: fallbackImg }, caption: `🔍 *Asset Array:* ${text}\n(Integration standard linked)` }, { quoted: mec });
-                } catch (e) { reply(from, "⚠️ Vector lookup crash.", mec); }
+                    await sock.sendMessage(from, { image: { url: fallbackImg }, caption: `🔍 *Vector Theme:* ${text}` }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Search pipeline fault.", mec); }
                 break;
 
             // ════════════════ AI MODULES ════════════════
             case 'ai':
-                if (!text) return reply(from, "Prompt signature clean layer missing.", mec);
+                if (!text) return reply(from, "Provide clear system input string.", mec);
                 try {
-                    const geminiKey = 'AIzaSyA0vT-XYECtNyqGODgvW-uLEud2ywZY558';
                     const payload = { contents: [{ parts: [{ text: text }] }] };
-                    const aiRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, payload, {
+                    const aiRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${config.GEMINI_API_KEY}`, payload, {
                         headers: { 'Content-Type': 'application/json' }
                     });
                     const responseText = aiRes.data.candidates[0].content.parts[0].text;
                     await reply(from, `🧠 *Gemini AI Interface:*\n\n${responseText}`, mec);
-                } catch (e) { reply(from, "⚠️ Gemini Core API is unreachable.", mec); }
+                } catch (e) { reply(from, "⚠️ Gemini API core layer dropped response.", mec); }
                 break;
 
-            // ════════════════ ANIME ART PIPELINES ════════════════
+            // ════════════════ ANIME ENGINE ARTIFACTS ════════════════
             case 'maid':
             case 'waifu':
             case 'soldier':
                 try {
                     const artRes = await axios.get(`https://api.waifu.pics/sfw/waifu`);
                     await sock.sendMessage(from, { image: { url: artRes.data.url }, caption: `🐅 Tora Anime Vector [${command}]` }, { quoted: mec });
-                } catch (e) { reply(from, "⚠️ Frame processing pipeline failure.", mec); }
+                } catch (e) { reply(from, "⚠️ Vector asset retrieval fault.", mec); }
                 break;
 
-            // ════════════════ MEDIA ARTIFACT CONTROLS ════════════════
+            // ════════════════ MEDIA LAYER PARSERS ════════════════
             case 'vv':
                 const quotedMsg = mec.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-                if (!quotedMsg) return reply(from, "Reply to an active View-Once message layer.", mec);
+                if (!quotedMsg) return reply(from, "Reply to an active View-Once layer block.", mec);
                 const viewOnceType = Object.keys(quotedMsg)[0];
                 if (viewOnceType === 'viewOnceMessageV2' || viewOnceType === 'viewOnceMessage') {
                     const realMsg = quotedMsg[viewOnceType].message;
@@ -630,72 +605,72 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                     let buffer = Buffer.from([]);
                     for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
                     if (mediaType === 'imageMessage') {
-                        await sock.sendMessage(from, { image: buffer, caption: "🐅 View-Once Bypass complete" }, { quoted: mec });
+                        await sock.sendMessage(from, { image: buffer, caption: "🐅 View-Once extracted successfully." }, { quoted: mec });
                     } else if (mediaType === 'videoMessage') {
-                        await sock.sendMessage(from, { video: buffer, caption: "🐅 View-Once Bypass complete" }, { quoted: mec });
+                        await sock.sendMessage(from, { video: buffer, caption: "🐅 View-Once extracted successfully." }, { quoted: mec });
                     }
-                } else { reply(from, "Target component isn't classified view-once.", mec); }
+                } else { reply(from, "Target component is not classified as view-once.", mec); }
                 break;
 
             case 'getdp':
                 let userJid = text ? text.replace(/[^0-9]/g, '') + '@s.whatsapp.net' : sender;
                 try {
                     const imgUrl = await sock.profilePictureUrl(userJid, 'image');
-                    await sock.sendMessage(from, { image: { url: imgUrl }, caption: "🐅 Frame Asset Recovers Successfully" }, { quoted: mec });
-                } catch (e) { reply(from, "❌ Profile asset encrypted or unavailable.", mec); }
+                    await sock.sendMessage(from, { image: { url: imgUrl }, caption: "🐅 Profile picture asset acquired." }, { quoted: mec });
+                } catch (e) { reply(from, "❌ Secure layer encryption blocked lookups.", mec); }
                 break;
 
             case 'sticker':
-                await reply(from, "⚙️ Transcoding standard sticker matrix layout...", mec);
+                await reply(from, "⚙️ Transcoding media stream to custom webp matrix framework structure...", mec);
                 break;
 
             case 'toimg':
-                await reply(from, "⚙️ Processing compilation vector mapping to baseline image format...", mec);
+                await reply(from, "⚙️ Re-compiling vector block allocations back to pure baseline image format...", mec);
                 break;
 
-            // ════════════════ GROUP OPERATIONS MANAGEMENT ════════════════
+            // ════════════════ ADMINISTRATOR MANAGEMENT MODES ════════════════
             case 'kick':
                 if (!isGroup) return reply(from, "Group scope execution only.", mec);
-                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied: Requires Administrator status.", mec);
-                if (!isBotAdmin) return reply(from, "Engine administrative authority down.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access denied: Administrator token validation missing.", mec);
+                if (!isBotAdmin) return reply(from, "Administrative privileges missing.", mec);
                 let targetKick = mec.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || args[0]?.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
-                if (!targetKick) return reply(from, "Tag or explicitly provide the tracking reference identifier.", mec);
+                if (!targetKick) return reply(from, "Tag or provide exact tracking reference.", mec);
                 await sock.groupParticipantsUpdate(from, [targetKick], "remove");
-                await reply(from, "🎯 Target completely purged.", mec);
+                await reply(from, "🎯 Target cleanly purged from local system context.", mec);
                 break;
 
             case 'add':
                 if (!isGroup) return reply(from, "Group scope execution only.", mec);
-                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied: Requires Administrator status.", mec);
-                if (!isBotAdmin) return reply(from, "Engine administrative authority down.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access denied: Administrator token validation missing.", mec);
+                if (!isBotAdmin) return reply(from, "Administrative privileges missing.", mec);
                 let targetAdd = text.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
                 await sock.groupParticipantsUpdate(from, [targetAdd], "add");
-                await reply(from, "✅ Integration sequence complete.", mec);
+                await reply(from, "✅ Injection execution pipeline complete.", mec);
                 break;
 
             case 'promote':
             case 'demote':
                 if (!isGroup) return reply(from, "Group scope execution only.", mec);
-                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
-                if (!isBotAdmin) return reply(from, "Engine missing administrative access token.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access denied.", mec);
+                if (!isBotAdmin) return reply(from, "Administrative clearance mismatch.", mec);
                 let targetAction = mec.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || args[0]?.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
                 await sock.groupParticipantsUpdate(from, [targetAction], command);
-                await reply(from, `⚙️ Access privilege updated to [${command}].`, mec);
+                await reply(from, `⚙️ Node status reassigned down to [${command}].`, mec);
                 break;
 
             case 'mute':
             case 'unmute':
                 if (!isGroup) return reply(from, "Group scope execution only.", mec);
-                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
-                if (!isBotAdmin) return reply(from, "Engine requires administrative capabilities.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access denied.", mec);
+                if (!isBotAdmin) return reply(from, "Administrative authority down.", mec);
                 await sock.groupSettingUpdate(from, command === 'mute' ? 'announcement' : 'not_announcement');
-                await reply(from, `🔒 Structural modification completed: Group is ${command}ed.`, mec);
+                await reply(from, `🔒 Structural layout adjustments completed: Group is ${command}ed.`, mec);
                 break;
 
             case 'tagall':
                 if (!isGroup) return reply(from, "Group scope execution only.", mec);
-                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
-                let tagStr = `🐅 *TORA ALL PARTICIPANTS PING* 🐅\n\n`;
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access denied.", mec);
+                let tagStr = `🐅 *TORA ALL PARTICIPANTS PING MASTER* 🐅\n\n`;
                 let mentionsArray = [];
                 for (let participant of groupParticipants) {
                     tagStr += `▫️ @${participant.id.split('@')[0]}\n`;
@@ -706,58 +681,58 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
 
             case 'hidetag':
                 if (!isGroup) return reply(from, "Group scope execution only.", mec);
-                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
-                await sock.sendMessage(from, { text: text || 'Attention structural alert broadcast.', mentions: groupParticipants.map(p => p.id) });
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access denied.", mec);
+                await sock.sendMessage(from, { text: text || 'Attention system wide structural alert.', mentions: groupParticipants.map(p => p.id) });
                 break;
 
-            // ════════════════ SECURITY PRIVILEGES (OWNER MANDATES) ════════════════
+            // ════════════════ CRITICAL SECURITY PRIVILEGES (OWNER LEVEL) ════════════════
             case 'broadcast':
-                if (!isOwner) return reply(from, "Absolute Owner Signature mismatch.", mec);
-                if (!text) return reply(from, "Input broadcast string package.", mec);
+                if (!isOwner) return reply(from, "Absolute Owner Signature verification mismatch.", mec);
+                if (!text) return reply(from, "Input targeted tracking string array package.", mec);
                 let chatHistory = await sock.chats.all();
                 for (let c of chatHistory) {
-                    await sock.sendMessage(c.id, { text: `🐅 *TORA SYSTEM BROADCAST* 🐅\n\n${text}` });
+                    await sock.sendMessage(c.id, { text: `🐅 *TORA SECURE SYSTEM BROADCAST* 🐅\n\n${text}` });
                 }
-                await reply(from, "📢 Deployment package pushed down all open sockets.", mec);
+                await reply(from, "📢 Deployment matrix pushed down all verified cloud channels.", mec);
                 break;
 
             case 'bomb':
-                if (!isOwner) return reply(from, "Execution authorization missing.", mec);
+                if (!isOwner) return reply(from, "Authorization signature failure.", mec);
                 let iterativeLimit = parseInt(args[0]) || 5;
-                let conceptualString = args.slice(1).join(" ") || "🐅 TORA ENHANCED MATRIX LAYER";
+                let conceptualString = args.slice(1).join(" ") || "🐅 TORA ENHANCED SYSTEM STRUCTURAL LAYER";
                 for(let k=0; k<iterativeLimit; k++) { await sock.sendMessage(from, { text: conceptualString }); }
                 break;
 
             case 'block':
             case 'unblock':
-                if (!isOwner) return reply(from, "Execution access cleared for owner validation only.", mec);
+                if (!isOwner) return reply(from, "Validation mismatch: Exclusive owner control route.", mec);
                 let targetBlock = mec.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || from;
                 await sock.updateBlockStatus(targetBlock, command);
-                await reply(from, `🔒 Target network reference completely [${command}ed].`, mec);
+                await reply(from, `🔒 Network socket context successfully [${command}ed].`, mec);
                 break;
 
             case 'join':
-                if (!isOwner) return reply(from, "Owner clearance validation mismatch.", mec);
-                if (!text) return reply(from, "Provide invite validation code string.", mec);
+                if (!isOwner) return reply(from, "Validation mismatch.", mec);
+                if (!text) return reply(from, "Provide exact invite validation trace string.", mec);
                 await sock.groupAcceptInvite(text.replace('https://chat.whatsapp.com/', ''));
-                await reply(from, "✅ Successfully bound to group system layer.", mec);
+                await reply(from, "✅ System module bounds successfully to target ecosystem.", mec);
                 break;
 
             case 'leave':
-                if (!isOwner) return reply(from, "Owner access vector only.", mec);
-                await reply(from, "🐅 Disconnecting socket from chat system context...", mec);
+                if (!isOwner) return reply(from, "Validation mismatch.", mec);
+                await reply(from, "🐅 Disconnecting engine socket framework allocations from current group...", mec);
                 await sock.groupLeave(from);
                 break;
 
             case 'restart':
-                if (!isOwner) return reply(from, "Access denied.", mec);
-                await reply(from, "🔄 Re-executing engine handshakes... Dropping process context.", mec);
+                if (!isOwner) return reply(from, "Validation mismatch.", mec);
+                await reply(from, "🔄 Resetting pipeline parameters... Re-executing instance contexts.", mec);
                 process.exit(0);
                 break;
 
             case 'shutdown':
-                if (!isOwner) return reply(from, "Access denied.", mec);
-                await reply(from, "🛑 Hard killing process engine matrix. System down.", mec);
+                if (!isOwner) return reply(from, "Validation mismatch.", mec);
+                await reply(from, "🛑 Killing server matrix process blocks. System offline.", mec);
                 server.close(() => { process.exit(0); });
                 break;
 
@@ -765,9 +740,9 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 break;
         }
     } catch (err) {
-        console.error("Critical Runtime Error caught inside process container:", err);
+        console.error("Critical error intercepted inside active runtime socket:", err);
     }
   });
 }
 
-server.listen(PORT, () => console.log(`🚀 Master Dashboard Gateway online on port ${PORT}`));
+server.listen(config.PORT, () => console.log(`🚀 Dynamic Tora Master Engine Interface Online on Port ${config.PORT}`));
