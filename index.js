@@ -3,13 +3,14 @@ const {
   default: makeWASocket, 
   useMultiFileAuthState, 
   DisconnectReason,
-  fetchLatestBaileysVersion // Added to prevent outdated version blocks
+  fetchLatestBaileysVersion 
 } = require("@whiskeysockets/baileys");
 const express = require("express");
 const { createServer } = require("http");
 const { WebSocketServer, WebSocket } = require("ws");
 const pino = require("pino");
 const fs = require("fs");
+const axios = require("axios");
 
 const app = express();
 const server = createServer(app);
@@ -24,7 +25,9 @@ const connectionDelayTimers = new Map();
 
 app.use(express.json());
 
-// Main UI Dashboard Gateway
+// ═════════════════════════════════════════════════════════
+// 1. WEB DASHBOARD UI
+// ═════════════════════════════════════════════════════════
 app.get("/", (req, res) => {
   res.send(`
 <!DOCTYPE html>
@@ -178,6 +181,9 @@ app.get("/", (req, res) => {
   `);
 });
 
+// ═════════════════════════════════════════════════════════
+// 2. WEBSOCKET ROUTING
+// ═════════════════════════════════════════════════════════
 wss.on("connection", (ws) => {
   let boundSessionId = null;
   ws.on("message", async (message) => {
@@ -209,6 +215,9 @@ function sendToSession(sessionId, payload) {
   }
 }
 
+// ═════════════════════════════════════════════════════════
+// 3. CORE ENGINE & CONNECTION LOGIC
+// ═════════════════════════════════════════════════════════
 async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   const sessionPath = `./auth_info/${sessionId}`;
   if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
@@ -228,11 +237,10 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
     activeSessions.delete(sessionId);
   }
 
-  // Clear potential lock file corruption before boot
   try {
     if (fs.existsSync(`${sessionPath}/creds.json`)) {
       const stat = fs.statSync(`${sessionPath}/creds.json`);
-      if (stat.size < 50) { // Broken/empty JSON fallback guard
+      if (stat.size < 50) { 
         fs.rmSync(sessionPath, { recursive: true, force: true });
         fs.mkdirSync(sessionPath, { recursive: true });
       }
@@ -241,7 +249,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
   
-  // Dynamic fetcher injects the exact modern version WA expects right now
   let waVersion = [2, 3000, 10154131]; 
   try {
     const { version } = await fetchLatestBaileysVersion();
@@ -277,7 +284,7 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
             if (activeSessions.get(sessionId) === sock) {
               initializeWhatsAppInstance(sessionId, phoneNumber, mode);
             }
-          }, 10000); // Higher padding window prevents thread collision loops
+          }, 10000); 
           connectionDelayTimers.set(sessionId, retryTimer);
         } else {
           fs.rmSync(sessionPath, { recursive: true, force: true });
@@ -287,23 +294,212 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
     }
   });
 
-  // Handle Pairing Sequence with a secure 7-second stream buffer setup
   if (mode === "pairing" && !state.creds.registered) {
     setTimeout(async () => {
       try {
         if (activeSessions.get(sessionId) === sock) {
-          // Extra step checking stream registration availability
           const code = await sock.requestPairingCode(phoneNumber);
           const formattedCode = code?.match(/.{1,4}/g)?.join("-") || code;
           sendToSession(sessionId, { type: "code", code: formattedCode });
         }
       } catch (err) {
         if (activeSessions.get(sessionId) === sock) {
-          sendToSession(sessionId, { type: "error", message: "Handshake rejected by WA servers. Try re-generating." });
+          sendToSession(sessionId, { type: "error", message: "Handshake rejected. Try again." });
         }
       }
     }, 7000); 
   }
+
+  // ═════════════════════════════════════════════════════════
+  // 4. COMMAND HANDLER & API INTEGRATIONS
+  // ═════════════════════════════════════════════════════════
+  sock.ev.on("messages.upsert", async (chatUpdate) => {
+    try {
+        const mec = chatUpdate.messages[0];
+        if (!mec.message) return;
+        
+        if (mec.key && mec.key.remoteJid === 'status@broadcast') return; 
+        
+        const from = mec.key.remoteJid;
+        const type = Object.keys(mec.message)[0];
+        
+        let body = (type === 'conversation') ? mec.message.conversation : 
+                   (type === 'extendedTextMessage') ? mec.message.extendedTextMessage.text : 
+                   (type === 'imageMessage') ? mec.message.imageMessage.caption : 
+                   (type === 'videoMessage') ? mec.message.videoMessage.caption : '';
+        
+        const prefix = ".";
+        const isCmd = body.startsWith(prefix);
+        if (!isCmd) return;
+        
+        const command = body.slice(prefix.length).trim().split(/ +/).shift().toLowerCase();
+        const args = body.trim().split(/ +/).slice(1);
+        const text = args.join(" ");
+
+        const isGroup = from.endsWith('@g.us');
+
+        // Helper function for quick replies
+        const reply = async (targetJid, textContent, originalMsg) => {
+            await sock.sendMessage(targetJid, { text: textContent }, { quoted: originalMsg });
+        };
+
+        switch (command) {
+            case 'ping':
+                const startTime = Date.now();
+                await reply(from, "Calculating latency...", mec);
+                const latency = Date.now() - startTime;
+                await reply(from, `🚀 *Pong!* Latency: _${latency}ms_`, mec);
+                break;
+
+            case 'menu':
+            case 'help':
+                const menuText = `🐅 *TORA MD ENGINE* 🐅\n\n` +
+                                 `*Media Commands:*\n` +
+                                 `▫️ \`.song <query>\` - Download MP3 audio\n` +
+                                 `▫️ \`.mp4 <url>\` - Download YouTube video\n` +
+                                 `▫️ \`.fb <url>\` - Download Facebook video\n` +
+                                 `▫️ \`.tt <url>\` - Download TikTok video\n` +
+                                 `▫️ \`.insta <url>\` - Download IG Reel/Post\n\n` +
+                                 `*Utility Commands:*\n` +
+                                 `▫️ \`.ai <prompt>\` - Ask Gemini AI\n` +
+                                 `▫️ \`.news\` - Get latest updates\n` +
+                                 `▫️ \`.mediafire <url>\` - Extract direct link\n` +
+                                 `▫️ \`.gdrive <url>\` - Extract direct link\n` +
+                                 `▫️ \`.runtime\` - Check bot uptime\n` +
+                                 `▫️ \`.groupinfo\` - Group metadata\n`;
+                await reply(from, menuText, mec);
+                break;
+
+            case 'runtime':
+                const uptime = process.uptime();
+                const hours = Math.floor(uptime / 3600);
+                const minutes = Math.floor((uptime % 3600) / 60);
+                const seconds = Math.floor(uptime % 60);
+                await reply(from, `⏳ *Uptime:* _${hours}h ${minutes}m ${seconds}s_`, mec);
+                break;
+
+            case 'groupinfo':
+                if (!isGroup) return reply(from, "This command can only be used in groups!", mec);
+                const groupMetadata = await sock.groupMetadata(from);
+                const groupDesc = groupMetadata.desc ? groupMetadata.desc : "No description set.";
+                const info = `👥 *Group Name:* ${groupMetadata.subject}\n` +
+                             `👑 *Creator:* ${groupMetadata.owner.split('@')[0]}\n` +
+                             `👥 *Members:* ${groupMetadata.participants.length}\n\n` +
+                             `📝 *Description:* ${groupDesc}`;
+                await reply(from, info, mec);
+                break;
+
+            case 'song':
+                if (!text) return reply(from, "Please provide a song name or URL.", mec);
+                await reply(from, "⏳ Searching and downloading audio...", mec);
+                try {
+                    let videoUrl = text;
+                    if (!text.includes("youtube.com") && !text.includes("youtu.be")) {
+                        const ytSearch = await axios.get(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(text)}&type=video&key=AIzaSyCEq9oJnzf5eFhkqdLlM_ggjCifaC4kk5o`);
+                        if (!ytSearch.data.items.length) return reply(from, "❌ Could not find that track.", mec);
+                        videoUrl = `https://www.youtube.com/watch?v=${ytSearch.data.items[0].id.videoId}`;
+                    }
+
+                    const mp3Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp3/download?url=${videoUrl}&apiKey=key_6eff37305f63aa5c`);
+                    const audioDlUrl = mp3Res.data?.data?.download; 
+                    
+                    if (audioDlUrl) {
+                        await sock.sendMessage(from, { audio: { url: audioDlUrl }, mimetype: 'audio/mp4' }, { quoted: mec });
+                    } else {
+                        reply(from, "❌ Failed to fetch audio stream.", mec);
+                    }
+                } catch (e) {
+                    reply(from, "⚠️ Error processing song request.", mec);
+                }
+                break;
+
+            case 'mp4':
+                if (!text) return reply(from, "Please provide a YouTube URL.", mec);
+                await reply(from, "⏳ Fetching 720p video...", mec);
+                try {
+                    const mp4Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp4v2/download?url=${text}&quality=720&apiKey=key_6eff37305f63aa5c`);
+                    const videoDlUrl = mp4Res.data?.data?.download;
+                    await sock.sendMessage(from, { video: { url: videoDlUrl }, caption: "🎥 Tora MD Video Downloader" }, { quoted: mec });
+                } catch (e) {
+                    reply(from, "⚠️ Failed to fetch video.", mec);
+                }
+                break;
+
+            case 'fb':
+                if (!text) return reply(from, "Please provide a Facebook video URL.", mec);
+                try {
+                    const fbRes = await axios.get(`https://www.movanest.xyz/v2/fbdown?url=${encodeURIComponent(text)}`);
+                    await sock.sendMessage(from, { video: { url: fbRes.data.url }, caption: "📘 Tora MD" }, { quoted: mec });
+                } catch (e) {
+                    reply(from, "⚠️ Error downloading FB video.", mec);
+                }
+                break;
+
+            case 'tt':
+                if (!text) return reply(from, "Please provide a TikTok URL.", mec);
+                try {
+                    const ttRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/tiktok?url=${text}&apiKey=key_6eff37305f63aa5c`);
+                    await sock.sendMessage(from, { video: { url: ttRes.data?.data?.noWatermark }, caption: "🎵 No Watermark TT" }, { quoted: mec });
+                } catch (e) {
+                    reply(from, "⚠️ Error downloading TikTok.", mec);
+                }
+                break;
+
+            case 'insta':
+                if (!text) return reply(from, "Please provide an Instagram Reel/Post URL.", mec);
+                try {
+                    const igRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/instadown/download?url=${text}&apiKey=key_6eff37305f63aa5c`);
+                    await sock.sendMessage(from, { video: { url: igRes.data?.data?.url }, caption: "📸 IG Download" }, { quoted: mec });
+                } catch (e) {
+                    reply(from, "⚠️ Error downloading IG media.", mec);
+                }
+                break;
+
+            case 'ai':
+                if (!text) return reply(from, "What do you want to ask Gemini?", mec);
+                try {
+                    const geminiKey = 'AIzaSyA0vT-XYECtNyqGODgvW-uLEud2ywZY558';
+                    const payload = { contents: [{ parts: [{ text: text }] }] };
+                    const aiRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, payload);
+                    
+                    const responseText = aiRes.data.candidates[0].content.parts[0].text;
+                    await reply(from, `🧠 *Gemini AI:*\n\n${responseText}`, mec);
+                } catch (e) {
+                    reply(from, "⚠️ Gemini API is currently unreachable.", mec);
+                }
+                break;
+
+            case 'news':
+                try {
+                    const newsRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/lankadeepa/latest-news?page=1&apiKey=key_6eff37305f63aa5c`);
+                    const headline = newsRes.data?.data[0]?.title || "No news available.";
+                    const link = newsRes.data?.data[0]?.url || "";
+                    await reply(from, `📰 *Latest Update:*\n\n${headline}\n${link}`, mec);
+                } catch (e) {
+                    reply(from, "⚠️ Failed to fetch news.", mec);
+                }
+                break;
+
+            case 'mediafire':
+            case 'gdrive':
+                if (!text) return reply(from, `Please provide a valid ${command} link.`, mec);
+                try {
+                    const endpoint = command === 'mediafire' ? 'mediafire' : 'gdrive';
+                    const fileRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/${endpoint}?url=${text}&apiKey=key_6eff37305f63aa5c`);
+                    const directUrl = fileRes.data?.data?.downloadUrl || fileRes.data?.data?.url;
+                    await reply(from, `📥 *Direct Download Link extracted:*\n${directUrl}`, mec);
+                } catch (e) {
+                    reply(from, `⚠️ Failed to extract ${command} link.`, mec);
+                }
+                break;
+
+            default:
+                break;
+        }
+    } catch (err) {
+        console.error("Error handling message stream:", err);
+    }
+  });
 }
 
 server.listen(PORT, () => console.log(`🚀 Master Gateway online on port ${PORT}`));
