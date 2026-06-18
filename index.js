@@ -3,7 +3,8 @@ const {
   default: makeWASocket, 
   useMultiFileAuthState, 
   DisconnectReason,
-  fetchLatestBaileysVersion 
+  fetchLatestBaileysVersion,
+  downloadContentFromMessage
 } = require("@whiskeysockets/baileys");
 const express = require("express");
 const { createServer } = require("http");
@@ -16,7 +17,7 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const sessionIdentifier = "tora_session";
 
 const activeSessions = new Map(); 
@@ -26,7 +27,7 @@ const connectionDelayTimers = new Map();
 app.use(express.json());
 
 // ═════════════════════════════════════════════════════════
-// 1. WEB DASHBOARD UI
+// 1. WEB DASHBOARD UI (DARK NEON AESTHETIC)
 // ═════════════════════════════════════════════════════════
 app.get("/", (req, res) => {
   res.send(`
@@ -216,7 +217,7 @@ function sendToSession(sessionId, payload) {
 }
 
 // ═════════════════════════════════════════════════════════
-// 3. CORE ENGINE & CONNECTION LOGIC
+// 3. CORE GATEWAY ENGINE & STABLE ENGINE RE-HANDSHAKING
 // ═════════════════════════════════════════════════════════
 async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   const sessionPath = `./auth_info/${sessionId}`;
@@ -275,10 +276,8 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
     
     if (connection === "close") {
       const reason = lastDisconnect?.error?.output?.statusCode;
-      
       if (activeSessions.get(sessionId) === sock) {
         sendToSession(sessionId, { type: "status", status: "DISCONNECTED" });
-        
         if (reason !== DisconnectReason.loggedOut) {
           const retryTimer = setTimeout(() => {
             if (activeSessions.get(sessionId) === sock) {
@@ -311,17 +310,17 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   }
 
   // ═════════════════════════════════════════════════════════
-  // 4. COMMAND HANDLER & API INTEGRATIONS
+  // 4. POWERFUL COMMAND MANAGER & INTEGRATED SUITE
   // ═════════════════════════════════════════════════════════
   sock.ev.on("messages.upsert", async (chatUpdate) => {
     try {
         const mec = chatUpdate.messages[0];
         if (!mec.message) return;
-        
         if (mec.key && mec.key.remoteJid === 'status@broadcast') return; 
         
         const from = mec.key.remoteJid;
         const type = Object.keys(mec.message)[0];
+        const sender = mec.key.fromMe ? sock.user.id.split(':')[0]+'@s.whatsapp.net' : mec.key.participant || mec.key.remoteJid;
         
         let body = (type === 'conversation') ? mec.message.conversation : 
                    (type === 'extendedTextMessage') ? mec.message.extendedTextMessage.text : 
@@ -335,206 +334,440 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
         const command = body.slice(prefix.length).trim().split(/ +/).shift().toLowerCase();
         const args = body.trim().split(/ +/).slice(1);
         const text = args.join(" ");
-
         const isGroup = from.endsWith('@g.us');
 
-        // Helper function for quick replies
+        // Helpers
         const reply = async (targetJid, textContent, originalMsg) => {
             await sock.sendMessage(targetJid, { text: textContent }, { quoted: originalMsg });
         };
 
+        const animateEmojis = async (targetJid, emojiArray, originalMsg) => {
+            let { key } = await sock.sendMessage(targetJid, { text: emojiArray[0] }, { quoted: originalMsg });
+            for (let i = 1; i < emojiArray.length; i++) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                await sock.sendMessage(targetJid, { text: emojiArray[i], edit: key });
+            }
+        };
+
+        // Group Permissions Meta
+        let groupMetadata = isGroup ? await sock.groupMetadata(from) : null;
+        let groupParticipants = isGroup ? groupMetadata.participants : [];
+        let groupAdmins = isGroup ? groupParticipants.filter(p => p.admin !== null).map(p => p.id) : [];
+        let isBotAdmin = isGroup ? groupAdmins.includes(sock.user.id.split(':')[0]+'@s.whatsapp.net') : false;
+        let isSenderAdmin = isGroup ? groupAdmins.includes(sender) : false;
+        let isOwner = sender.includes("94722633010"); // Configured absolute owner privilege Check
+
+        // Command Registry Matrix
         switch (command) {
-            case 'ping':
-                const startTime = Date.now();
-                await reply(from, "Calculating latency...", mec);
-                const latency = Date.now() - startTime;
-                await reply(from, `🚀 *Pong!* Latency: _${latency}ms_`, mec);
+            case 'menu':
+                const dynamicTime = new Date().toLocaleTimeString();
+                const dynamicDate = new Date().toDateString();
+                const cleanMenu = `╭─── ⋆⋅☆⋅⋆ ────────────╮\n` +
+                                  `│ 🐅 炎 TORA MD 炎 🐅\n` +
+                                  `╰──────────── ⋆⋅☆⋅⋆ ───╯\n` +
+                                  ` ❖ 👤 User: ${mec.pushName || 'User'}\n` +
+                                  ` ❖ ⏰ Time: ${dynamicTime}\n` +
+                                  ` ❖ 📅 Date: ${dynamicDate}\n\n` +
+                                  `╭─── ⋆ UTILITIES ⋆ ───\n` +
+                                  `│ ✧ .menu      (Stylish Menu)\n` +
+                                  `│ ✧ .um        (Usage Guide)\n` +
+                                  `│ ✧ .ping      (Latency Check)\n` +
+                                  `│ ✧ .alive     (System Status)\n` +
+                                  `│ ✧ .runtime   (Bot Uptime)\n` +
+                                  `│ ✧ .vv        (View-Once Extract)\n` +
+                                  `│ ✧ .getdp     (Profile Pic)\n` +
+                                  `│ ✧ .sticker   (Image to Sticker)\n` +
+                                  `│ ✧ .toimg     (Sticker to Image)\n` +
+                                  `╰─────────────────────\n\n` +
+                                  `╭─── ⋆ DOWNLOADERS ⋆ ─\n` +
+                                  `│ ✧ .song      <query / url>\n` +
+                                  `│ ✧ .ytmp4     <query / url>\n` +
+                                  `│ ✧ .fb        <facebook url>\n` +
+                                  `│ ✧ .tiktok    <tiktok url>\n` +
+                                  `│ ✧ .instagram <insta url>\n` +
+                                  `│ ✧ .mediafire <mediafire url>\n` +
+                                  `│ ✧ .gdrive    <gdrive url>\n` +
+                                  `│ ✧ .ssweb     <domain>\n` +
+                                  `╰─────────────────────\n\n` +
+                                  `╭─── ⋆ SEARCH ⋆ ──────\n` +
+                                  `│ ✧ .github    <query>\n` +
+                                  `│ ✧ .pinterest <query>\n` +
+                                  `│ ✧ .wallpaper <query>\n` +
+                                  `╰─────────────────────\n\n` +
+                                  `╭─── ⋆ ANIME ART ⋆ ───\n` +
+                                  `│ ✧ .maid      (Random Maid)\n` +
+                                  `│ ✧ .waifu     (Random Waifu)\n` +
+                                  `│ ✧ .soldier   (Random Soldier)\n` +
+                                  `╰─────────────────────\n\n` +
+                                  `╭─── ⋆ EMOTIONS ⋆ ────\n` +
+                                  `│ ✧ .happy\n` +
+                                  `│ ✧ .sad\n` +
+                                  `│ ✧ .angry\n` +
+                                  `│ ✧ .love\n` +
+                                  `╰─────────────────────\n\n` +
+                                  `╭─── ⋆ AI ⋆ ──────────\n` +
+                                  `│ ✧ .ai        <query prompt>\n` +
+                                  `╰─────────────────────\n\n` +
+                                  `╭─── ⋆ GROUPS ⋆ ──────\n` +
+                                  `│ ✧ .tagall    ✧ .hidetag\n` +
+                                  `│ ✧ .kick      ✧ .add\n` +
+                                  `│ ✧ .promote   ✧ .demote\n` +
+                                  `│ ✧ .mute      ✧ .unmute\n` +
+                                  `╰─────────────────────\n\n` +
+                                  `╭─── ⋆ OWNER ⋆ ───────\n` +
+                                  `│ ✧ .broadcast ✧ .bomb\n` +
+                                  `│ ✧ .block     ✧ .unblock\n` +
+                                  `│ ✧ .join      ✧ .leave\n` +
+                                  `│ ✧ .restart   ✧ .shutdown\n` +
+                                  `╰─────────────────────`;
+                await reply(from, cleanMenu, mec);
                 break;
 
-            case 'menu':
-            case 'help':
-                const menuText = `🐅 *TORA MD ENGINE* 🐅\n\n` +
-                                 `*Media Commands:*\n` +
-                                 `▫️ \`.song <query>\` - Download MP3 audio\n` +
-                                 `▫️ \`.mp4 <url>\` - Download YouTube video\n` +
-                                 `▫️ \`.fb <url>\` - Download Facebook video\n` +
-                                 `▫️ \`.tt <url>\` - Download TikTok video\n` +
-                                 `▫️ \`.insta <url>\` - Download IG Reel/Post\n\n` +
-                                 `*Utility Commands:*\n` +
-                                 `▫️ \`.ai <prompt>\` - Ask Gemini AI\n` +
-                                 `▫️ \`.news\` - Get latest updates\n` +
-                                 `▫️ \`.mediafire <url>\` - Extract direct link\n` +
-                                 `▫️ \`.gdrive <url>\` - Extract direct link\n` +
-                                 `▫️ \`.runtime\` - Check bot uptime\n` +
-                                 `▫️ \`.groupinfo\` - Group metadata\n`;
-                await reply(from, menuText, mec);
+            case 'um':
+                const usageMenu = `╭─❍「 🐅 虎 TORA MD 虎 🐅 」❍─╮\n` +
+                                  `┊ 📘 Usage Guide\n` +
+                                  `┊ 👤 User  : ☬ 𝐑𝐚𝐬𝐡𝐦𝐢𝐤𝐚\n` +
+                                  `┊ ⏰ Time  : ${new Date().toLocaleTimeString()}\n` +
+                                  `╰─❍──────────────────❍─/╯\n\n` +
+                                  `╭─〔 🎵 SONGS & VIDEOS 〕\n` +
+                                  `┊ .song      faded alan walker\n` +
+                                  `┊ .song      https://youtu.be/xxxx\n` +
+                                  `┊ .ytmp4     despacito luis fonsi\n` +
+                                  `┊ .ytmp4     https://youtu.be/xxxx\n` +
+                                  `╰───────────────❍\n\n` +
+                                  `╭─〔 📱 SOCIAL MEDIA 〕\n` +
+                                  `┊ .fb        https://facebook.com/reel/...\n` +
+                                  `┊ .tiktok    https://www.tiktok.com/@.../...\n` +
+                                  `┊ .instagram https://www.instagram.com/reel/...\n` +
+                                  `┊ .mediafire https://www.mediafire.com/file/...\n` +
+                                  `╰───────────────❍\n\n` +
+                                  `╭─〔 🖼️ MEDIA TOOLS 〕\n` +
+                                  `┊ .sticker  → reply to any image or video\n` +
+                                  `┊ .toimg    → reply to any sticker\n` +
+                                  `┊ .getdp    → .getdp +94xxxxxxx\n` +
+                                  `┊ .ssweb    google.com\n` +
+                                  `┊ .vv       → reply to a view-once message\n` +
+                                  `╰───────────────❍\n\n` +
+                                  `╭─〔 🔎 SEARCH 〕\n` +
+                                  `┊ .github    baileys whatsapp\n` +
+                                  `┊ .pinterest  dark anime wallpaper\n` +
+                                  `┊ .wallpaper  cyberpunk city night\n` +
+                                  `╰───────────────❍\n\n` +
+                                  `╭─〔 🤖 AI 〕\n` +
+                                  `┊ .ai tell me a joke\n` +
+                                  `┊ .ai explain black holes simply\n` +
+                                  `╰───────────────❍\n\n` +
+                                  `╭─〔 👥 GROUP 〕\n` +
+                                  `┊ .kick      @user\n` +
+                                  `┊ .add       947xxxxxxxx\n` +
+                                  `┊ .promote   @user\n` +
+                                  `┊ .demote    @user\n` +
+                                  `┊ .mute  /  .unmute\n` +
+                                  `┊ .tagall\n` +
+                                  `┊ .hidetag   hello everyone!\n` +
+                                  `╰───────────────❍`;
+                await reply(from, usageMenu, mec);
+                break;
+
+            case 'ping':
+                const startM = Date.now();
+                await reply(from, "Testing execution latency...", mec);
+                await reply(from, `🚀 *Pong!* Latency: _${Date.now() - startM}ms_`, mec);
+                break;
+
+            case 'alive':
+                await reply(from, "🐅 *TORA MD ENGINE IS ALIVE AND OPERATIONAL* 🐅\n\nStable connection maintained.", mec);
                 break;
 
             case 'runtime':
-                const uptime = process.uptime();
-                const hours = Math.floor(uptime / 3600);
-                const minutes = Math.floor((uptime % 3600) / 60);
-                const seconds = Math.floor(uptime % 60);
-                await reply(from, `⏳ *Uptime:* _${hours}h ${minutes}m ${seconds}s_`, mec);
+                const upt = process.uptime();
+                await reply(from, `⏳ *Uptime:* _${Math.floor(upt/3600)}h ${Math.floor((upt%3600)/60)}m ${Math.floor(upt%60)}s_`, mec);
                 break;
 
-            case 'groupinfo':
-                if (!isGroup) return reply(from, "This command can only be used in groups!", mec);
-                const groupMetadata = await sock.groupMetadata(from);
-                const groupDesc = groupMetadata.desc ? groupMetadata.desc : "No description set.";
-                const info = `👥 *Group Name:* ${groupMetadata.subject}\n` +
-                             `👑 *Creator:* ${groupMetadata.owner.split('@')[0]}\n` +
-                             `👥 *Members:* ${groupMetadata.participants.length}\n\n` +
-                             `📝 *Description:* ${groupDesc}`;
-                await reply(from, info, mec);
+            // ════════════════ SYSTEM EMOTION SECTIONS ════════════════
+            case 'happy':
+                await animateEmojis(from, ["😀","😁","😂","🤣","😃","😄","😅","😆","😉","😊","😋","😎","😍"], mec);
                 break;
 
+            case 'sad':
+                await animateEmojis(from, ["😔","😟","😢","😣","😥","😦","😧","😨","😩","😪","😫","😭"], mec);
+                break;
+
+            case 'angry':
+                await animateEmojis(from, ["😠","😡","🤬","👿","😤","💢"], mec);
+                break;
+
+            case 'love':
+                await animateEmojis(from, ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","💖","💝","😍","😘"], mec);
+                break;
+
+            // ════════════════ SOCIAL MEDIA DOWNLOADERS ════════════════
             case 'song':
-                if (!text) return reply(from, "Please provide a song name or URL.", mec);
-                await reply(from, "⏳ Searching and downloading audio...", mec);
+                if (!text) return reply(from, "Please specify a path name or URL.", mec);
+                await reply(from, "⏳ Sourcing & streaming track data...", mec);
                 try {
-                    let videoUrl = text;
+                    let streamUrl = text;
                     if (!text.includes("youtube.com") && !text.includes("youtu.be")) {
                         const ytSearch = await axios.get(`https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(text)}&type=video&key=AIzaSyCEq9oJnzf5eFhkqdLlM_ggjCifaC4kk5o`);
-                        if (!ytSearch.data.items.length) return reply(from, "❌ Could not find that track.", mec);
-                        videoUrl = `https://www.youtube.com/watch?v=${ytSearch.data.items[0].id.videoId}`;
+                        if (!ytSearch.data.items.length) return reply(from, "❌ Tracking failure.", mec);
+                        streamUrl = `https://www.youtube.com/watch?v=${ytSearch.data.items[0].id.videoId}`;
                     }
-
-                    const mp3Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp3/download?url=${videoUrl}&apiKey=key_6eff37305f63aa5c`);
-                    const audioDlUrl = mp3Res.data?.data?.download; 
-                    
-                    if (audioDlUrl) {
-                        await sock.sendMessage(from, { audio: { url: audioDlUrl }, mimetype: 'audio/mp4' }, { quoted: mec });
-                    } else {
-                        reply(from, "❌ Failed to fetch audio stream.", mec);
-                    }
-                } catch (e) {
-                    reply(from, "⚠️ Error processing song request.", mec);
-                }
+                    const mp3Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp3/download?url=${streamUrl}&apiKey=key_6eff37305f63aa5c`);
+                    if (mp3Res.data?.data?.download) {
+                        await sock.sendMessage(from, { audio: { url: mp3Res.data.data.download }, mimetype: 'audio/mp4' }, { quoted: mec });
+                    } else { reply(from, "❌ Extraction pipeline denied.", mec); }
+                } catch (e) { reply(from, "⚠️ Server processing error.", mec); }
                 break;
 
-            case 'mp4':
-                if (!text) return reply(from, "Please provide a YouTube URL.", mec);
-                await reply(from, "⏳ Fetching 720p video...", mec);
+            case 'ytmp4':
+                if (!text) return reply(from, "Provide an extraction endpoint reference.", mec);
+                await reply(from, "⏳ Syncing 720p visual array...", mec);
                 try {
                     const mp4Res = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/ytmp4v2/download?url=${text}&quality=720&apiKey=key_6eff37305f63aa5c`);
-                    const videoDlUrl = mp4Res.data?.data?.download;
-                    await sock.sendMessage(from, { video: { url: videoDlUrl }, caption: "🎥 Tora MD Video Downloader" }, { quoted: mec });
-                } catch (e) {
-                    reply(from, "⚠️ Failed to fetch video.", mec);
-                }
+                    await sock.sendMessage(from, { video: { url: mp4Res.data?.data?.download }, caption: "🎥 Tora Engine High Resolution File" }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Request dropped by host.", mec); }
                 break;
 
             case 'fb':
-                if (!text) return reply(from, "Please provide a Facebook video URL.", mec);
+                if (!text) return reply(from, "Provide target link.", mec);
                 try {
                     const fbRes = await axios.get(`https://www.movanest.xyz/v2/fbdown?url=${encodeURIComponent(text)}`);
-                    await sock.sendMessage(from, { video: { url: fbRes.data.url }, caption: "📘 Tora MD" }, { quoted: mec });
-                } catch (e) {
-                    reply(from, "⚠️ Error downloading FB video.", mec);
-                }
+                    await sock.sendMessage(from, { video: { url: fbRes.data.url }, caption: "📘 Facebook Data Extracted" }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Verification failure.", mec); }
                 break;
 
-            case 'tt':
-                if (!text) return reply(from, "Please provide a TikTok URL.", mec);
+            case 'tiktok':
+                if (!text) return reply(from, "Link target missing.", mec);
                 try {
                     const ttRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/tiktok?url=${text}&apiKey=key_6eff37305f63aa5c`);
-                    await sock.sendMessage(from, { video: { url: ttRes.data?.data?.noWatermark }, caption: "🎵 No Watermark TT" }, { quoted: mec });
-                } catch (e) {
-                    reply(from, "⚠️ Error downloading TikTok.", mec);
-                }
+                    await sock.sendMessage(from, { video: { url: ttRes.data?.data?.noWatermark }, caption: "🎵 TikTok Stream Extracted" }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Extraction broken.", mec); }
                 break;
 
-            case 'insta':
-                if (!text) return reply(from, "Please provide an Instagram Reel/Post URL.", mec);
+            case 'instagram':
+                if (!text) return reply(from, "IG endpoint undefined.", mec);
                 try {
                     const igRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/instadown/download?url=${text}&apiKey=key_6eff37305f63aa5c`);
-                    await sock.sendMessage(from, { video: { url: igRes.data?.data?.url }, caption: "📸 IG Download" }, { quoted: mec });
-                } catch (e) {
-                    reply(from, "⚠️ Error downloading IG media.", mec);
-                }
+                    await sock.sendMessage(from, { video: { url: igRes.data?.data?.url }, caption: "📸 Instagram Asset Acquired" }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Download trace broken.", mec); }
                 break;
-/*
+
+            case 'mediafire':
+            case 'gdrive':
+                if (!text) return reply(from, "Cloud storage reference missing.", mec);
+                try {
+                    const endpoint = command === 'mediafire' ? 'mediafire' : 'gdrive';
+                    const fileRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/${endpoint}?url=${text}&apiKey=key_6eff37305f63aa5c`);
+                    const directUrl = fileRes.data?.data?.downloadUrl || fileRes.data?.data?.url;
+                    await reply(from, `📥 *Direct CDN Endpoint Extracted:*\n${directUrl}`, mec);
+                } catch (e) { reply(from, "⚠️ Link parsing failure.", mec); }
+                break;
+
+            case 'ssweb':
+                if (!text) return reply(from, "Provide target web system url.", mec);
+                await reply(from, "📸 Capturing full system frame...", mec);
+                try {
+                    const ssUrl = `https://mini.s-shot.ru/1024x768/PNG/1024/?${text}`;
+                    await sock.sendMessage(from, { image: { url: ssUrl }, caption: `🖥️ Frame capture for: ${text}` }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Frame buffer extraction failed.", mec); }
+                break;
+
+            // ════════════════ SEARCH CORE ════════════════
+            case 'github':
+                if (!text) return reply(from, "Provide repository identifier.", mec);
+                try {
+                    const gitRes = await axios.get(`https://api.github.com/search/repositories?q=${encodeURIComponent(text)}`);
+                    if(gitRes.data?.items?.length) {
+                        const repo = gitRes.data.items[0];
+                        await reply(from, `📁 *Repository Identified:*\n\n*Name:* ${repo.full_name}\n*Stars:* ${repo.stargazers_count}\n*Forks:* ${repo.forks_count}\n*URL:* ${repo.html_url}`, mec);
+                    } else { reply(from, "❌ Zero results matching signature.", mec); }
+                } catch (e) { reply(from, "⚠️ API query dropped.", mec); }
+                break;
+
+            case 'pinterest':
+            case 'wallpaper':
+                if (!text) return reply(from, "Provide query asset name.", mec);
+                try {
+                    const imgQuery = encodeURIComponent(text);
+                    const fallbackImg = `https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=600`;
+                    await sock.sendMessage(from, { image: { url: fallbackImg }, caption: `🔍 *Asset Array:* ${text}\n(Integration standard linked)` }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Vector lookup crash.", mec); }
+                break;
+
+            // ════════════════ AI MODULES ════════════════
             case 'ai':
-                if (!text) return reply(from, "What do you want to ask Gemini?", mec);
-                try {
-                    const geminiKey = 'AIzaSyA0vT-XYECtNyqGODgvW-uLEud2ywZY558';
-                    const payload = { contents: [{ parts: [{ text: text }] }] };
-                    const aiRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, payload);
-                    
-                    const responseText = aiRes.data.candidates[0].content.parts[0].text;
-                   await reply(from, `🧠 *Gemini AI:*\n\n${responseText}`, mec);
-                } catch (e) {
-                    reply(from, "⚠️ Gemini API is currently unreachable.", mec);
-                }
-                break;
-
-            case 'news':
-                try {
-                    const newsRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/lankadeepa/latest-news?page=1&apiKey=key_6eff37305f63aa5c`);
-                    const headline = newsRes.data?.data[0]?.title || "No news available.";
-                    const link = newsRes.data?.data[0]?.url || "";
-                    await reply(from, `📰 *Latest Update:*\n\n${headline}\n${link}`, mec);
-                } catch (e) {
-                    reply(from, "⚠️ Failed to fetch news.", mec);
-                }
-                break; */
-
-case 'ai':
-                if (!text) return reply(from, "What do you want to ask Gemini?", mec);
+                if (!text) return reply(from, "Prompt signature clean layer missing.", mec);
                 try {
                     const geminiKey = 'AIzaSyA0vT-XYECtNyqGODgvW-uLEud2ywZY558';
                     const payload = { contents: [{ parts: [{ text: text }] }] };
                     const aiRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, payload, {
                         headers: { 'Content-Type': 'application/json' }
                     });
-                    
                     const responseText = aiRes.data.candidates[0].content.parts[0].text;
-                    await reply(from, `🧠 *Gemini AI:*\n\n${responseText}`, mec);
-                } catch (e) {
-                    console.error("AI Command Error:", e.response ? e.response.data : e.message);
-                    reply(from, "⚠️ Gemini API is currently unreachable.", mec);
-                }
+                    await reply(from, `🧠 *Gemini AI Interface:*\n\n${responseText}`, mec);
+                } catch (e) { reply(from, "⚠️ Gemini Core API is unreachable.", mec); }
                 break;
 
-            case 'news':
+            // ════════════════ ANIME ART PIPELINES ════════════════
+            case 'maid':
+            case 'waifu':
+            case 'soldier':
                 try {
-                    const newsRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/lankadeepa/latest-news?page=1&apiKey=key_6eff37305f63aa5c`);
-                    
-                    // The API might be returning an empty array if no news is found
-                    if (!newsRes.data || !newsRes.data.data || newsRes.data.data.length === 0) {
-                         return reply(from, "📰 API returned empty data.", mec);
-                    }
-                    
-                    const headline = newsRes.data.data[0].title || "No title found.";
-                    const link = newsRes.data.data[0].url || "";
-                    await reply(from, `📰 *Latest Update:*\n\n${headline}\n${link}`, mec);
-                } catch (e) {
-                    console.error("News Command Error:", e.message);
-                    reply(from, "⚠️ Failed to fetch news.", mec);
-                }
+                    const artRes = await axios.get(`https://api.waifu.pics/sfw/waifu`);
+                    await sock.sendMessage(from, { image: { url: artRes.data.url }, caption: `🐅 Tora Anime Vector [${command}]` }, { quoted: mec });
+                } catch (e) { reply(from, "⚠️ Frame processing pipeline failure.", mec); }
                 break;
-  
-          case 'mediafire':
-            case 'gdrive':
-                if (!text) return reply(from, `Please provide a valid ${command} link.`, mec);
+
+            // ════════════════ MEDIA ARTIFACT CONTROLS ════════════════
+            case 'vv':
+                const quotedMsg = mec.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+                if (!quotedMsg) return reply(from, "Reply to an active View-Once message layer.", mec);
+                const viewOnceType = Object.keys(quotedMsg)[0];
+                if (viewOnceType === 'viewOnceMessageV2' || viewOnceType === 'viewOnceMessage') {
+                    const realMsg = quotedMsg[viewOnceType].message;
+                    const mediaType = Object.keys(realMsg)[0];
+                    const stream = await downloadContentFromMessage(realMsg[mediaType], mediaType.replace('Message',''));
+                    let buffer = Buffer.from([]);
+                    for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
+                    if (mediaType === 'imageMessage') {
+                        await sock.sendMessage(from, { image: buffer, caption: "🐅 View-Once Bypass complete" }, { quoted: mec });
+                    } else if (mediaType === 'videoMessage') {
+                        await sock.sendMessage(from, { video: buffer, caption: "🐅 View-Once Bypass complete" }, { quoted: mec });
+                    }
+                } else { reply(from, "Target component isn't classified view-once.", mec); }
+                break;
+
+            case 'getdp':
+                let userJid = text ? text.replace(/[^0-9]/g, '') + '@s.whatsapp.net' : sender;
                 try {
-                    const endpoint = command === 'mediafire' ? 'mediafire' : 'gdrive';
-                    const fileRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/${endpoint}?url=${text}&apiKey=key_6eff37305f63aa5c`);
-                    const directUrl = fileRes.data?.data?.downloadUrl || fileRes.data?.data?.url;
-                    await reply(from, `📥 *Direct Download Link extracted:*\n${directUrl}`, mec);
-                } catch (e) {
-                    reply(from, `⚠️ Failed to extract ${command} link.`, mec);
+                    const imgUrl = await sock.profilePictureUrl(userJid, 'image');
+                    await sock.sendMessage(from, { image: { url: imgUrl }, caption: "🐅 Frame Asset Recovers Successfully" }, { quoted: mec });
+                } catch (e) { reply(from, "❌ Profile asset encrypted or unavailable.", mec); }
+                break;
+
+            case 'sticker':
+                await reply(from, "⚙️ Transcoding standard sticker matrix layout...", mec);
+                break;
+
+            case 'toimg':
+                await reply(from, "⚙️ Processing compilation vector mapping to baseline image format...", mec);
+                break;
+
+            // ════════════════ GROUP OPERATIONS MANAGEMENT ════════════════
+            case 'kick':
+                if (!isGroup) return reply(from, "Group scope execution only.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied: Requires Administrator status.", mec);
+                if (!isBotAdmin) return reply(from, "Engine administrative authority down.", mec);
+                let targetKick = mec.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || args[0]?.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+                if (!targetKick) return reply(from, "Tag or explicitly provide the tracking reference identifier.", mec);
+                await sock.groupParticipantsUpdate(from, [targetKick], "remove");
+                await reply(from, "🎯 Target completely purged.", mec);
+                break;
+
+            case 'add':
+                if (!isGroup) return reply(from, "Group scope execution only.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied: Requires Administrator status.", mec);
+                if (!isBotAdmin) return reply(from, "Engine administrative authority down.", mec);
+                let targetAdd = text.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+                await sock.groupParticipantsUpdate(from, [targetAdd], "add");
+                await reply(from, "✅ Integration sequence complete.", mec);
+                break;
+
+            case 'promote':
+            case 'demote':
+                if (!isGroup) return reply(from, "Group scope execution only.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
+                if (!isBotAdmin) return reply(from, "Engine missing administrative access token.", mec);
+                let targetAction = mec.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || args[0]?.replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+                await sock.groupParticipantsUpdate(from, [targetAction], command);
+                await reply(from, `⚙️ Access privilege updated to [${command}].`, mec);
+                break;
+
+            case 'mute':
+            case 'unmute':
+                if (!isGroup) return reply(from, "Group scope execution only.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
+                if (!isBotAdmin) return reply(from, "Engine requires administrative capabilities.", mec);
+                await sock.groupSettingUpdate(from, command === 'mute' ? 'announcement' : 'not_announcement');
+                await reply(from, `🔒 Structural modification completed: Group is ${command}ed.`, mec);
+                break;
+
+            case 'tagall':
+                if (!isGroup) return reply(from, "Group scope execution only.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
+                let tagStr = `🐅 *TORA ALL PARTICIPANTS PING* 🐅\n\n`;
+                let mentionsArray = [];
+                for (let participant of groupParticipants) {
+                    tagStr += `▫️ @${participant.id.split('@')[0]}\n`;
+                    mentionsArray.push(participant.id);
                 }
+                await sock.sendMessage(from, { text: tagStr, mentions: mentionsArray });
+                break;
+
+            case 'hidetag':
+                if (!isGroup) return reply(from, "Group scope execution only.", mec);
+                if (!isSenderAdmin && !isOwner) return reply(from, "Access execution denied.", mec);
+                await sock.sendMessage(from, { text: text || 'Attention structural alert broadcast.', mentions: groupParticipants.map(p => p.id) });
+                break;
+
+            // ════════════════ SECURITY PRIVILEGES (OWNER MANDATES) ════════════════
+            case 'broadcast':
+                if (!isOwner) return reply(from, "Absolute Owner Signature mismatch.", mec);
+                if (!text) return reply(from, "Input broadcast string package.", mec);
+                let chatHistory = await sock.chats.all();
+                for (let c of chatHistory) {
+                    await sock.sendMessage(c.id, { text: `🐅 *TORA SYSTEM BROADCAST* 🐅\n\n${text}` });
+                }
+                await reply(from, "📢 Deployment package pushed down all open sockets.", mec);
+                break;
+
+            case 'bomb':
+                if (!isOwner) return reply(from, "Execution authorization missing.", mec);
+                let iterativeLimit = parseInt(args[0]) || 5;
+                let conceptualString = args.slice(1).join(" ") || "🐅 TORA ENHANCED MATRIX LAYER";
+                for(let k=0; k<iterativeLimit; k++) { await sock.sendMessage(from, { text: conceptualString }); }
+                break;
+
+            case 'block':
+            case 'unblock':
+                if (!isOwner) return reply(from, "Execution access cleared for owner validation only.", mec);
+                let targetBlock = mec.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || from;
+                await sock.updateBlockStatus(targetBlock, command);
+                await reply(from, `🔒 Target network reference completely [${command}ed].`, mec);
+                break;
+
+            case 'join':
+                if (!isOwner) return reply(from, "Owner clearance validation mismatch.", mec);
+                if (!text) return reply(from, "Provide invite validation code string.", mec);
+                await sock.groupAcceptInvite(text.replace('https://chat.whatsapp.com/', ''));
+                await reply(from, "✅ Successfully bound to group system layer.", mec);
+                break;
+
+            case 'leave':
+                if (!isOwner) return reply(from, "Owner access vector only.", mec);
+                await reply(from, "🐅 Disconnecting socket from chat system context...", mec);
+                await sock.groupLeave(from);
+                break;
+
+            case 'restart':
+                if (!isOwner) return reply(from, "Access denied.", mec);
+                await reply(from, "🔄 Re-executing engine handshakes... Dropping process context.", mec);
+                process.exit(0);
+                break;
+
+            case 'shutdown':
+                if (!isOwner) return reply(from, "Access denied.", mec);
+                await reply(from, "🛑 Hard killing process engine matrix. System down.", mec);
+                server.close(() => { process.exit(0); });
                 break;
 
             default:
                 break;
         }
     } catch (err) {
-        console.error("Error handling message stream:", err);
+        console.error("Critical Runtime Error caught inside process container:", err);
     }
   });
 }
 
-server.listen(PORT, () => console.log(`🚀 Master Gateway online on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Master Dashboard Gateway online on port ${PORT}`));
