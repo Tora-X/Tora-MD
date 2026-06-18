@@ -454,7 +454,7 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                     reply(from, "⚠️ Error downloading IG media.", mec);
                 }
                 break;
-
+/*
             case 'ai':
                 if (!text) return reply(from, "What do you want to ask Gemini?", mec);
                 try {
@@ -463,7 +463,7 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                     const aiRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, payload);
                     
                     const responseText = aiRes.data.candidates[0].content.parts[0].text;
-                    await reply(from, `🧠 *Gemini AI:*\n\n${responseText}`, mec);
+                   await reply(from, `🧠 *Gemini AI:*\n\n${responseText}`, mec);
                 } catch (e) {
                     reply(from, "⚠️ Gemini API is currently unreachable.", mec);
                 }
@@ -478,9 +478,44 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 } catch (e) {
                     reply(from, "⚠️ Failed to fetch news.", mec);
                 }
+                break; */
+
+case 'ai':
+                if (!text) return reply(from, "What do you want to ask Gemini?", mec);
+                try {
+                    const geminiKey = 'AIzaSyA0vT-XYECtNyqGODgvW-uLEud2ywZY558';
+                    const payload = { contents: [{ parts: [{ text: text }] }] };
+                    const aiRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, payload, {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    const responseText = aiRes.data.candidates[0].content.parts[0].text;
+                    await reply(from, `🧠 *Gemini AI:*\n\n${responseText}`, mec);
+                } catch (e) {
+                    console.error("AI Command Error:", e.response ? e.response.data : e.message);
+                    reply(from, "⚠️ Gemini API is currently unreachable.", mec);
+                }
                 break;
 
-            case 'mediafire':
+            case 'news':
+                try {
+                    const newsRes = await axios.get(`https://mr-thinuzz-api-build.vercel.app/api/lankadeepa/latest-news?page=1&apiKey=key_6eff37305f63aa5c`);
+                    
+                    // The API might be returning an empty array if no news is found
+                    if (!newsRes.data || !newsRes.data.data || newsRes.data.data.length === 0) {
+                         return reply(from, "📰 API returned empty data.", mec);
+                    }
+                    
+                    const headline = newsRes.data.data[0].title || "No title found.";
+                    const link = newsRes.data.data[0].url || "";
+                    await reply(from, `📰 *Latest Update:*\n\n${headline}\n${link}`, mec);
+                } catch (e) {
+                    console.error("News Command Error:", e.message);
+                    reply(from, "⚠️ Failed to fetch news.", mec);
+                }
+                break;
+  
+          case 'mediafire':
             case 'gdrive':
                 if (!text) return reply(from, `Please provide a valid ${command} link.`, mec);
                 try {
