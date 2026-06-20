@@ -12,10 +12,10 @@ const pino = require("pino");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const { Pool } = require("pg"); // Added Postgres Client Driver
 
 // Project File Imports
 const config = require('./config');
-const { connectDB, syncSessionToDisk, syncSessionToCloud } = require('./database');
 
 const app = express();
 const server = createServer(app);
@@ -27,7 +27,74 @@ const connectionDelayTimers = new Map();
 
 app.use(express.json());
 
-// Connect Database Layer
+// ═════════════════════════════════════════════════════════
+// 🛠️ NATIVE SUPABASE POSTGRESQL HYBRID SYNC LAYER
+// ═════════════════════════════════════════════════════════
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || config.DATABASE_URL,
+    ssl: { rejectUnauthorized: false } // Required for secure cloud communication with Supabase
+});
+
+async function connectDB() {
+    try {
+        // Automatically provisions the structural sync table if it doesn't exist yet
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS tora_session_store (
+                session_id TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_content TEXT NOT NULL,
+                PRIMARY KEY (session_id, file_name)
+            );
+        `);
+        console.log("🐘 Supabase PostgreSQL Connection Established & Schema Verified!");
+    } catch (err) {
+        console.error("❌ Supabase Initialization Failure:", err.message);
+    }
+}
+
+async function syncSessionToDisk(sessionId, localPath) {
+    try {
+        if (!fs.existsSync(localPath)) {
+            fs.mkdirSync(localPath, { recursive: true });
+        }
+        const res = await pool.query(
+            'SELECT file_name, file_content FROM tora_session_store WHERE session_id = $1', 
+            [sessionId]
+        );
+        for (const row of res.rows) {
+            const fullPath = path.join(localPath, row.file_name);
+            fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+            fs.writeFileSync(fullPath, row.file_content, 'utf8');
+        }
+        console.log(`📥 Downloaded and synchronized ${res.rows.length} auth files from Supabase to local disk.`);
+    } catch (err) {
+        console.error("❌ Error running syncSessionToDisk:", err.message);
+    }
+}
+
+async function syncSessionToCloud(sessionId, localPath) {
+    try {
+        if (!fs.existsSync(localPath)) return;
+        const files = fs.readdirSync(localPath);
+        for (const file of files) {
+            const fullPath = path.join(localPath, file);
+            const stat = fs.statSync(fullPath);
+            if (stat.isFile()) {
+                const content = fs.readFileSync(fullPath, 'utf8');
+                await pool.query(`
+                    INSERT INTO tora_session_store (session_id, file_name, file_content)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (session_id, file_name)
+                    DO UPDATE SET file_content = EXCLUDED.file_content;
+                `, [sessionId, file, content]);
+            }
+        }
+    } catch (err) {
+        console.error("❌ Error running syncSessionToCloud:", err.message);
+    }
+}
+
+// Fire up Database Connection
 connectDB();
 
 // ═════════════════════════════════════════════════════════
@@ -206,7 +273,7 @@ function sendToSession(sessionId, payload) {
 async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
   const localSessionPath = path.join(__dirname, 'auth_info', sessionId);
   
-  // 1. Recover backup copies down from MongoDB prior to starting up local states
+  // 1. Recover backup copies down from Supabase prior to starting up local states
   await syncSessionToDisk(sessionId, localSessionPath);
 
   if (connectionDelayTimers.has(sessionId)) {
@@ -242,10 +309,10 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
 
   activeSessions.set(sessionId, sock);
   
-  // Intercept Credential Changes & Pipe them asynchronously to MongoDB Cluster
+  // Intercept Credential Changes & Pipe them asynchronously to Supabase Shards
   sock.ev.on("creds.update", async () => {
       await saveCreds();
-      syncSessionToCloud(sessionId, localSessionPath);
+      await syncSessionToCloud(sessionId, localSessionPath);
   });
 
   sock.ev.on("connection.update", async (update) => {
@@ -319,7 +386,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
             await sock.sendMessage(targetJid, { text: textContent }, { quoted: originalMsg });
         };
 
-        // Sequential Frame-by-Frame Emoji Editing Animation Loop
         const animateEmojis = async (targetJid, emojiArray, originalMsg) => {
             let { key } = await sock.sendMessage(targetJid, { text: emojiArray[0] }, { quoted: originalMsg });
             for (let i = 1; i < emojiArray.length; i++) {
@@ -453,7 +519,8 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 break;
 
             case 'alive':
-                await reply(from, "🐅 *TORA MD ENGINE IS ONLINE & SECURED VIA MONGODB* 🐅", mec);
+                // Updated status to reflect Supabase Relational Cluster
+                await reply(from, "🐅 *TORA MD ENGINE IS ONLINE & SECURED VIA SUPABASE POSTGRESQL* 🐅", mec);
                 break;
 
             case 'runtime':
@@ -461,7 +528,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 await reply(from, `⏳ *Uptime Matrix:* _${Math.floor(upt/3600)}h ${Math.floor((upt%3600)/60)}m ${Math.floor(upt%60)}s_`, mec);
                 break;
 
-            // ════════════════ SYSTEM ANIMATED EMOTIONS ════════════════
             case 'happy':
                 await animateEmojis(from, ["😀","😁","😂","🤣","😃","😄","😅","😆","😉","😊","😋","😎","😍"], mec);
                 break;
@@ -478,7 +544,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 await animateEmojis(from, ["❤️","🧡","💛","💚","💙","💜","🖤","💖","💝","😍","😘"], mec);
                 break;
 
-            // ════════════════ SOCIAL MEDIA DOWNLOADERS ════════════════
             case 'song':
                 if (!text) return reply(from, "Please provide a song query or URL.", mec);
                 await reply(from, "⏳ Fetching audio stream mapping...", mec);
@@ -549,7 +614,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 } catch (e) { reply(from, "⚠️ Render interface timed out.", mec); }
                 break;
 
-            // ════════════════ SEARCH CORE ════════════════
             case 'github':
                 if (!text) return reply(from, "Provide repository name.", mec);
                 try {
@@ -570,7 +634,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 } catch (e) { reply(from, "⚠️ Search pipeline fault.", mec); }
                 break;
 
-            // ════════════════ AI MODULES ════════════════
             case 'ai':
                 if (!text) return reply(from, "Provide clear system input string.", mec);
                 try {
@@ -583,7 +646,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 } catch (e) { reply(from, "⚠️ Gemini API core layer dropped response.", mec); }
                 break;
 
-            // ════════════════ ANIME ENGINE ARTIFACTS ════════════════
             case 'maid':
             case 'waifu':
             case 'soldier':
@@ -593,7 +655,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 } catch (e) { reply(from, "⚠️ Vector asset retrieval fault.", mec); }
                 break;
 
-            // ════════════════ MEDIA LAYER PARSERS ════════════════
             case 'vv':
                 const quotedMsg = mec.message?.extendedTextMessage?.contextInfo?.quotedMessage;
                 if (!quotedMsg) return reply(from, "Reply to an active View-Once layer block.", mec);
@@ -628,7 +689,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 await reply(from, "⚙️ Re-compiling vector block allocations back to pure baseline image format...", mec);
                 break;
 
-            // ════════════════ ADMINISTRATOR MANAGEMENT MODES ════════════════
             case 'kick':
                 if (!isGroup) return reply(from, "Group scope execution only.", mec);
                 if (!isSenderAdmin && !isOwner) return reply(from, "Access denied: Administrator token validation missing.", mec);
@@ -685,7 +745,6 @@ async function initializeWhatsAppInstance(sessionId, phoneNumber, mode) {
                 await sock.sendMessage(from, { text: text || 'Attention system wide structural alert.', mentions: groupParticipants.map(p => p.id) });
                 break;
 
-            // ════════════════ CRITICAL SECURITY PRIVILEGES (OWNER LEVEL) ════════════════
             case 'broadcast':
                 if (!isOwner) return reply(from, "Absolute Owner Signature verification mismatch.", mec);
                 if (!text) return reply(from, "Input targeted tracking string array package.", mec);
