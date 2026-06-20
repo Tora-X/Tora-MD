@@ -26,16 +26,15 @@ const wsClients = new Map();
 const connectionDelayTimers = new Map();
 
 app.use(express.json());
+
 // ═════════════════════════════════════════════════════════
 // 🛠️ NATIVE SUPABASE POSTGRESQL HYBRID SYNC LAYER
 // ═════════════════════════════════════════════════════════
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || config.DATABASE_URL,
-    ssl: { 
-        // 1. Clears the "self-signed certificate" error by skipping direct CA verification
-        rejectUnauthorized: false 
-    }
+    ssl: { rejectUnauthorized: false } // Required for secure cloud communication with Supabase
 });
+
 async function connectDB() {
     try {
         // Automatically provisions the structural sync table if it doesn't exist yet
