@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bot Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0e14; --card: #11151f; --accent: #4f9dff;
+    --accent-glow: rgba(79, 157, 255, 0.25); --text: #e6e9ef; --muted: #7b8496;
+    --ok: #3ddc84; --err: #ff5c7a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+  body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .card { background: var(--card); border: 1px solid #1d2330; border-radius: 18px; padding: 32px; max-width: 420px; width: 100%; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .status-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
+  .dot.connected { background: var(--ok); }
+  .tabs { display: flex; background: #0d1018; border-radius: 12px; padding: 4px; margin-bottom: 20px; }
+  .tab { flex: 1; text-align: center; padding: 8px; border-radius: 9px; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .tab.active { background: var(--accent); color: #fff; }
+  .panel { display: none; } .panel.active { display: block; }
+  input { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid #1d2330; background: #0d1018; color: var(--text); font-size: 14px; margin-bottom: 14px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  button { width: 100%; padding: 13px; border-radius: 12px; border: none; background: var(--accent); color: #fff; font-weight: 600; font-size: 14px; cursor: pointer; }
+  button:disabled { background: #1d2330; color: var(--muted); cursor: not-allowed; }
+  .qr-box, .code-box { display: none; margin-top: 18px; text-align: center; }
+  .qr-box img { max-width: 220px; border-radius: 10px; background: #fff; padding: 10px; }
+  .code-box .code { font-size: 28px; letter-spacing: 4px; font-weight: 700; margin-top: 8px; }
+  .log { margin-top: 20px; background: #0d1018; border-radius: 12px; padding: 12px; height: 110px; overflow-y: auto; font-family: monospace; font-size: 11px; color: #93f5b3; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🤖 Bot Dashboard</h1>
+  <div class="status-row"><span class="dot" id="dot"></span><span id="statusText">Connecting...</span></div>
+
+  <div class="tabs">
+    <div class="tab active" id="tabQr" onclick="switchTab('qr')">Scan QR</div>
+    <div class="tab" id="tabPair" onclick="switchTab('pair')">Pairing Code</div>
+  </div>
+
+  <div class="panel active" id="panelQr">
+    <p style="color: var(--muted); font-size: 13px; margin-bottom: 12px;">
+      Open WhatsApp → Settings → Linked Devices → Link a Device, then scan.
+    </p>
+    <div class="qr-box" id="qrBox"><img id="qrImg" /></div>
+  </div>
+
+  <div class="panel" id="panelPair">
+    <input id="phoneInput" placeholder="Phone number with country code, e.g. 15551234567" />
+    <button id="pairBtn" onclick="requestPairing()">Get Pairing Code</button>
+    <div class="code-box" id="codeBox">
+      <p style="color: var(--muted); font-size: 13px;">Enter this in WhatsApp:</p>
+      <div class="code" id="codeText">----</div>
+    </div>
+  </div>
+
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+  let ws;
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const log = document.getElementById('log');
+  const qrBox = document.getElementById('qrBox');
+  const qrImg = document.getElementById('qrImg');
+  const codeBox = document.getElementById('codeBox');
+  const codeText = document.getElementById('codeText');
+  const pairBtn = document.getElementById('pairBtn');
+
+  function logLine(msg) {
+    const el = document.createElement('div');
+    el.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab' + (tab === 'qr' ? 'Qr' : 'Pair')).classList.add('active');
+    document.getElementById('panel' + (tab === 'qr' ? 'Qr' : 'Pair')).classList.add('active');
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host);
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'status') {
+        statusText.textContent = data.status;
+        dot.classList.toggle('connected', data.status === 'CONNECTED');
+        logLine('Status: ' + data.status);
+        if (data.status === 'CONNECTED') {
+          qrBox.style.display = 'none';
+          codeBox.style.display = 'none';
+        }
+      } else if (data.type === 'qr') {
+        qrBox.style.display = 'block';
+        qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(data.qr);
+        logLine('New QR code received');
+      } else if (data.type === 'pairing-code') {
+        codeBox.style.display = 'block';
+        codeText.textContent = data.code;
+        pairBtn.disabled = false;
+        pairBtn.textContent = 'Regenerate Code';
+      } else if (data.type === 'pairing-error') {
+        logLine('Pairing error: ' + data.message);
+        pairBtn.disabled = false;
+        pairBtn.textContent = 'Get Pairing Code';
+      }
+    };
+
+    ws.onclose = () => setTimeout(connect, 2000);
+  }
+
+  function requestPairing() {
+    const phone = document.getElementById('phoneInput').value.trim();
+    if (!phone) return;
+    pairBtn.disabled = true;
+    pairBtn.textContent = 'Requesting...';
+    ws.send(JSON.stringify({ action: 'request-pairing-code', phone }));
+  }
+
+  connect();
+</script>
+</body>
+</html>

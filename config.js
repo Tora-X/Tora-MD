@@ -1,10 +1,8 @@
-require('dotenv').config();
+require("dotenv").config();
 
 module.exports = {
-    PORT: process.env.PORT || 8080,
-    MONGODB_URI: process.env.MONGODB_URI || "mongodb+srv://sapumalpku_db_user:jna4rnzO3ugXKLZP@cluster0.fck7ezm.mongodb.net/tora?retryWrites=true&w=majority",
-    SESSION_ID: process.env.SESSION_ID || "tora_session",
-    GEMINI_API_KEY: process.env.GEMINI_API_KEY || "AIzaSyA0vT-XYECtNyqGODgvW-uLEud2ywZY558",
-    THINUZZ_API_KEY: process.env.THINUZZ_API_KEY || "key_6eff37305f63aa5c",
-    OWNER_NUMBER: "94722633010"
+  prefix: process.env.PREFIX || ".",
+  port: parseInt(process.env.PORT, 10) || 8080,
+  sessionId: process.env.SESSION_ID || "tora_session",
+  databaseUrl: process.env.DATABASE_URL,
 };
